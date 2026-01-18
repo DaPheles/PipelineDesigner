@@ -7,27 +7,27 @@
             "name": "clk",
             "direction": "in",
             "data_type": "std_logic",
-            "position": [0, 1],
+            "position": [2, 8],
             "is_clock": true
         },
         {
             "name": "rst",
             "direction": "in",
             "data_type": "std_logic",
-            "position": [1, 0],
+            "position": [2, 0],
             "is_reset": true
         },
         {
             "name": "d",
             "direction": "in",
             "data_type": "std_logic_vector",
-            "position": [0, 2]
+            "position": [0, 4]
         },
         {
             "name": "q",
             "direction": "out",
             "data_type": "std_logic_vector",
-            "position": [5, 2]
+            "position": [4, 4]
         }
     ],
     "generics": [
@@ -38,8 +38,8 @@
         }
     ],
     "visual": {
-        "width": 5,
-        "height": 3,
+        "width": 4,
+        "height": 8,
         "color": "#5b9bd5"
     },
     "latency": 1
