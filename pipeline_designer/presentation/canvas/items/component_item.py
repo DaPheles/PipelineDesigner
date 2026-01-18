@@ -1,6 +1,6 @@
 """Component graphics item for the design canvas."""
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -20,6 +20,7 @@ class ComponentItem(QGraphicsRectItem):
 
     Component sizes and port positions are defined in grid units.
     This item converts grid units to pixels for rendering.
+    Snap-to-grid is enabled by default when moving components.
     """
 
     CORNER_RADIUS = 8.0
@@ -31,6 +32,7 @@ class ComponentItem(QGraphicsRectItem):
         instance: ComponentInstance,
         definition: ComponentDefinition | None = None,
         grid: GridConfig | None = None,
+        snap_to_grid: bool = True,
         parent: QGraphicsItem | None = None,
     ):
         """Initialize the component item.
@@ -39,6 +41,7 @@ class ComponentItem(QGraphicsRectItem):
             instance: The component instance model.
             definition: The component definition (optional).
             grid: Grid configuration for unit conversion.
+            snap_to_grid: Whether to snap to grid when moving (default True).
             parent: Parent graphics item.
         """
         super().__init__(parent)
@@ -46,6 +49,7 @@ class ComponentItem(QGraphicsRectItem):
         self._instance = instance
         self._definition = definition
         self._grid = grid or DEFAULT_GRID
+        self._snap_to_grid = snap_to_grid
         self._port_items: dict[str, PortItem] = {}
 
         self._setup_item()
@@ -161,9 +165,20 @@ class ComponentItem(QGraphicsRectItem):
         scene_pos = port_item.scenePos()
         return (scene_pos.x(), scene_pos.y())
 
+    def set_snap_to_grid(self, enabled: bool) -> None:
+        """Enable or disable snap-to-grid when moving."""
+        self._snap_to_grid = enabled
+
     def itemChange(self, change, value):
         """Handle item changes."""
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            if self._snap_to_grid:
+                new_pos = QPointF(
+                    self._grid.snap_to_grid(value.x()),
+                    self._grid.snap_to_grid(value.y()),
+                )
+                return new_pos
+        elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             pos = value
             self._instance.position = (pos.x(), pos.y())
         elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
