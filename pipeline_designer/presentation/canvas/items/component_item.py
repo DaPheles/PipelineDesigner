@@ -1,5 +1,7 @@
 """Component graphics item for the design canvas."""
 
+from typing import Callable
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -21,6 +23,9 @@ class ComponentItem(QGraphicsRectItem):
     Component sizes and port positions are defined in grid units.
     This item converts grid units to pixels for rendering.
     Snap-to-grid is enabled by default when moving components.
+
+    For registers, stage-aware snapping is applied to the x coordinate,
+    and movements trigger stage reassignment via the register_moved callback.
     """
 
     CORNER_RADIUS = 8.0
@@ -51,6 +56,14 @@ class ComponentItem(QGraphicsRectItem):
         self._grid = grid or DEFAULT_GRID
         self._snap_to_grid = snap_to_grid
         self._port_items: dict[str, PortItem] = {}
+        self._is_register = instance.definition_ref == "Register"
+        self._last_x: float = instance.position[0]
+
+        # Callback for register movement: (instance, old_x) -> None
+        self.register_moved: Callable[[ComponentInstance, float], None] | None = None
+
+        # Callback for stage-aware x snapping: (x) -> x
+        self.snap_register_x: Callable[[float], float] | None = None
 
         self._setup_item()
         self._create_ports()
@@ -153,6 +166,10 @@ class ComponentItem(QGraphicsRectItem):
         """Get the component definition."""
         return self._definition
 
+    def is_register(self) -> bool:
+        """Check if this component is a register."""
+        return self._is_register
+
     def get_port_item(self, port_name: str) -> PortItem | None:
         """Get a port item by name."""
         return self._port_items.get(port_name)
@@ -173,16 +190,34 @@ class ComponentItem(QGraphicsRectItem):
         """Handle item changes."""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if self._snap_to_grid:
-                new_pos = QPointF(
-                    self._grid.snap_to_grid(value.x()),
-                    self._grid.snap_to_grid(value.y()),
-                )
-                return new_pos
+                new_x = value.x()
+                new_y = self._grid.snap_to_grid(value.y())
+
+                # For registers, use stage-aware x snapping
+                if self._is_register and self.snap_register_x:
+                    new_x = self.snap_register_x(new_x)
+                else:
+                    new_x = self._grid.snap_to_grid(new_x)
+
+                return QPointF(new_x, new_y)
+
         elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             pos = value
-            self._instance.position = (pos.x(), pos.y())
+            new_x = pos.x()
+            old_x = self._last_x
+
+            # Update instance position
+            self._instance.position = (new_x, pos.y())
+
+            # For registers, notify if x position changed (stage change)
+            if self._is_register and new_x != old_x:
+                self._last_x = new_x
+                if self.register_moved:
+                    self.register_moved(self._instance, old_x)
+
         elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_appearance()
+
         return super().itemChange(change, value)
 
     def paint(
@@ -227,6 +262,11 @@ class ComponentItem(QGraphicsRectItem):
         name = self._instance.definition_ref
         if self._definition:
             name = self._definition.name
+
+        # For registers, show stage number
+        if self._is_register and self._instance.pipeline_stage is not None:
+            name = f"{name} [S{self._instance.pipeline_stage}]"
+
         painter.drawText(header_rect, Qt.AlignmentFlag.AlignCenter, name)
 
     def boundingRect(self) -> QRectF:

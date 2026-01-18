@@ -9,6 +9,7 @@ from .component import (
 )
 from .design import Design
 from .instance import ComponentInstance, Connection, PortReference
+from .stage import Stage
 
 __all__ = [
     "PortDirection",
@@ -20,4 +21,5 @@ __all__ = [
     "ComponentInstance",
     "Connection",
     "Design",
+    "Stage",
 ]

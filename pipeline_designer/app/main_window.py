@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models import ComponentDefinition
+from pipeline_designer.domain.models import ComponentDefinition, Design
 from pipeline_designer.infrastructure.persistence import LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
 from pipeline_designer.presentation.panels import ComponentPalette
@@ -166,12 +166,30 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Design",
-            str(Path.home()),
+            str(Path.cwd()),
             "Pipeline Design (*.json);;All Files (*)",
         )
 
         if file_path:
-            self._status_bar.showMessage(f"Open: {file_path} (not yet implemented)")
+            self._load_from_file(Path(file_path))
+
+    def _load_from_file(self, path: Path) -> None:
+        """Load a design from a file."""
+        try:
+            json_str = path.read_text()
+            design = Design.model_validate_json(json_str)
+
+            self._scene.set_design(design)
+
+            self._current_file = path
+            self._config.add_recent_file(path)
+            self._update_title()
+            self._status_bar.showMessage(
+                f"Loaded {path.name}: {len(design.components)} components, "
+                f"{len(design.stages)} stages"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load: {e}")
 
     def _on_save(self) -> None:
         """Handle save design action."""
