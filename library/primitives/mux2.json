@@ -13,19 +13,19 @@
             "name": "a",
             "direction": "in",
             "data_type": "std_logic_vector",
-            "position": [0, 1]
+            "position": [0, 2]
         },
         {
             "name": "b",
             "direction": "in",
             "data_type": "std_logic_vector",
-            "position": [0, 3]
+            "position": [0, 4]
         },
         {
             "name": "y",
             "direction": "out",
             "data_type": "std_logic_vector",
-            "position": [4, 2]
+            "position": [4, 3]
         }
     ],
     "generics": [
@@ -37,7 +37,7 @@
     ],
     "visual": {
         "width": 4,
-        "height": 4,
+        "height": 5,
         "color": "#70ad47"
     },
     "latency": 0
