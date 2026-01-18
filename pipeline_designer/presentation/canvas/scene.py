@@ -2,19 +2,22 @@
 
 from uuid import UUID
 
-from PySide6.QtCore import QRectF, Signal
+from PySide6.QtCore import QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 from pipeline_designer.domain.models import (
     ComponentDefinition,
     ComponentInstance,
+    Connection,
     Design,
+    PortReference,
     Stage,
 )
 
-from .items import ComponentItem, StageItem
+from .items import ComponentItem, ConnectionItem, StageItem, TempConnectionItem
+from .items.port_item import PortItem
 
 
 class DesignScene(QGraphicsScene):
@@ -22,12 +25,15 @@ class DesignScene(QGraphicsScene):
 
     Uses GridConfig to ensure all positions align to grid intersections.
     Manages pipeline stages that are defined by register placements.
+    Handles connection creation by dragging from output to input ports.
     """
 
     component_added = Signal(object)  # ComponentInstance
     component_removed = Signal(object)  # UUID
     component_selected = Signal(object)  # ComponentInstance or None
     stages_changed = Signal()  # Emitted when stage configuration changes
+    connection_added = Signal(object)  # Connection
+    connection_removed = Signal(object)  # UUID
 
     def __init__(self, grid: GridConfig | None = None, parent=None):
         """Initialize the design scene.
@@ -43,8 +49,14 @@ class DesignScene(QGraphicsScene):
         self._library: dict[str, ComponentDefinition] = {}
         self._component_items: dict[UUID, ComponentItem] = {}
         self._stage_items: dict[UUID, StageItem] = {}
+        self._connection_items: dict[UUID, ConnectionItem] = {}
         self._snap_to_grid = True
         self._register_width: float = 80.0  # Default, updated from library
+
+        # Connection creation state
+        self._temp_connection: TempConnectionItem | None = None
+        self._connection_source_port: PortItem | None = None
+        self._connection_source_component_id: UUID | None = None
 
         self._setup_scene()
 
@@ -75,6 +87,7 @@ class DesignScene(QGraphicsScene):
         self.clear()
         self._component_items.clear()
         self._stage_items.clear()
+        self._connection_items.clear()
         self._design = design
 
         # Create stage items first (they're behind components)
@@ -85,11 +98,16 @@ class DesignScene(QGraphicsScene):
         for instance in design.components:
             self._create_component_item(instance)
 
+        # Create connection items
+        for connection in design.connections:
+            self._create_connection_item(connection)
+
     def new_design(self) -> None:
         """Create a new empty design."""
         self.clear()
         self._component_items.clear()
         self._stage_items.clear()
+        self._connection_items.clear()
         self._design = Design()
 
     def add_component_at(self, component_name: str, x: float, y: float) -> ComponentItem | None:
@@ -135,39 +153,22 @@ class DesignScene(QGraphicsScene):
         return item
 
     def _get_register_x_position(self, x: float) -> float:
-        """Get the x position for a register, snapping to existing stages.
-
-        Args:
-            x: Desired x position.
-
-        Returns:
-            Adjusted x position (snapped to stage or grid).
-        """
-        # Check if position falls within an existing stage
+        """Get the x position for a register, snapping to existing stages."""
         stage = self._design.get_stage_at_x(x)
         if stage:
             return stage.x_position
-
-        # Snap to grid if no stage
         if self._snap_to_grid:
             return self._grid.snap_to_grid(x)
         return x
 
     def _assign_register_to_stage(self, instance: ComponentInstance) -> None:
-        """Assign a register instance to a stage, creating one if needed.
-
-        Args:
-            instance: The register component instance.
-        """
+        """Assign a register instance to a stage, creating one if needed."""
         x = instance.position[0]
-
-        # Check for existing stage at this position
         stage = self._design.get_stage_at_x(x)
 
         if stage is None:
-            # Create a new stage
             stage = Stage(
-                index=0,  # Will be set by reindex
+                index=0,
                 x_position=x,
                 width=self._register_width,
                 register_ids=[instance.id],
@@ -176,11 +177,9 @@ class DesignScene(QGraphicsScene):
             self._design.reindex_stages()
             self._rebuild_all_stages()
         else:
-            # Add to existing stage
             if instance.id not in stage.register_ids:
                 stage.register_ids.append(instance.id)
 
-        # Update instance's pipeline_stage
         instance.pipeline_stage = stage.index
         self._update_register_displays()
         self.stages_changed.emit()
@@ -194,12 +193,9 @@ class DesignScene(QGraphicsScene):
 
     def _rebuild_all_stages(self) -> None:
         """Rebuild all stage items from scratch."""
-        # Remove all existing stage items
         for stage_id, item in list(self._stage_items.items()):
             self.removeItem(item)
         self._stage_items.clear()
-
-        # Create new stage items
         for stage in self._design.stages:
             self._create_stage_item(stage)
 
@@ -235,49 +231,249 @@ class DesignScene(QGraphicsScene):
             item.register_moved = self._on_register_moved
             item.snap_register_x = self.snap_register_x
 
+        # Wire up port callbacks for connections
+        self._wire_port_callbacks(item)
+
         return item
 
-    def _on_register_moved(self, instance: ComponentInstance, old_x: float) -> None:
-        """Handle a register being moved.
+    def _wire_port_callbacks(self, component_item: ComponentItem) -> None:
+        """Wire up port callbacks for connection handling."""
+        for port_name, port_item in component_item._port_items.items():
+            port_item.on_connection_start = lambda pi=port_item: self._start_connection(pi)
 
-        Args:
-            instance: The register instance that moved.
-            old_x: The previous x position.
-        """
+    def _start_connection(self, port_item: PortItem) -> None:
+        """Start creating a connection from an output port."""
+        if not port_item.is_output():
+            return
+
+        self._connection_source_port = port_item
+        self._connection_source_component_id = port_item.get_component_id()
+
+        # Disable movement on all components during connection
+        self._set_components_movable(False)
+
+        # Create temporary connection line
+        start_pos = port_item.scenePos()
+        self._temp_connection = TempConnectionItem(start_pos)
+        self.addItem(self._temp_connection)
+
+    def _is_valid_connection_target(self, target_port: PortItem) -> bool:
+        """Check if a port is a valid connection target."""
+        if self._connection_source_port is None:
+            return False
+
+        # Must be an input port
+        if not target_port.is_input():
+            return False
+
+        # Cannot connect to same component
+        source_comp_id = self._connection_source_component_id
+        target_comp_id = target_port.get_component_id()
+        if source_comp_id == target_comp_id:
+            return False
+
+        # Check if connection already exists
+        source_port_name = self._connection_source_port.get_port().name
+        target_port_name = target_port.get_port().name
+        for conn in self._design.connections:
+            if (conn.source.component_id == source_comp_id and
+                conn.source.port_name == source_port_name and
+                conn.target.component_id == target_comp_id and
+                conn.target.port_name == target_port_name):
+                return False
+
+        return True
+
+    def _create_connection(
+        self,
+        source_port: PortItem,
+        source_comp_id: UUID,
+        target_port: PortItem,
+    ) -> None:
+        """Create a new connection between ports."""
+        target_comp_id = target_port.get_component_id()
+        if target_comp_id is None:
+            return
+
+        connection = Connection(
+            source=PortReference(
+                component_id=source_comp_id,
+                port_name=source_port.get_port().name,
+            ),
+            target=PortReference(
+                component_id=target_comp_id,
+                port_name=target_port.get_port().name,
+            ),
+        )
+
+        self._design.add_connection(connection)
+        self._create_connection_item(connection)
+        self.connection_added.emit(connection)
+
+    def _create_connection_item(self, connection: Connection) -> ConnectionItem | None:
+        """Create a graphics item for a connection."""
+        # Get source and target positions
+        source_pos = self._get_port_position(
+            connection.source.component_id,
+            connection.source.port_name,
+        )
+        target_pos = self._get_port_position(
+            connection.target.component_id,
+            connection.target.port_name,
+        )
+
+        if source_pos is None or target_pos is None:
+            return None
+
+        item = ConnectionItem(
+            connection,
+            QPointF(source_pos[0], source_pos[1]),
+            QPointF(target_pos[0], target_pos[1]),
+        )
+        self.addItem(item)
+        self._connection_items[connection.id] = item
+        return item
+
+    def _get_port_position(self, component_id: UUID, port_name: str) -> tuple[float, float] | None:
+        """Get the scene position of a port."""
+        comp_item = self._component_items.get(component_id)
+        if comp_item is None:
+            return None
+        return comp_item.get_port_scene_pos(port_name)
+
+    def _cancel_connection(self) -> None:
+        """Cancel the current connection creation."""
+        if self._temp_connection:
+            self.removeItem(self._temp_connection)
+            self._temp_connection = None
+        self._connection_source_port = None
+        self._connection_source_component_id = None
+
+        # Re-enable movement on all components
+        self._set_components_movable(True)
+
+        # Reset any highlighted ports
+        for comp_item in self._component_items.values():
+            for port_item in comp_item._port_items.values():
+                port_item.set_connection_target(False)
+
+    def _set_components_movable(self, movable: bool) -> None:
+        """Enable or disable movement on all component items."""
+        from PySide6.QtWidgets import QGraphicsItem
+        for comp_item in self._component_items.values():
+            comp_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
+
+    def remove_connection(self, connection_id: UUID) -> bool:
+        """Remove a connection from the scene."""
+        item = self._connection_items.get(connection_id)
+        if item is None:
+            return False
+
+        self.removeItem(item)
+        del self._connection_items[connection_id]
+        self._design.remove_connection(connection_id)
+        self.connection_removed.emit(connection_id)
+        return True
+
+    def update_connection_positions(self) -> None:
+        """Update all connection positions after components move."""
+        for conn_id, conn_item in self._connection_items.items():
+            conn = conn_item.get_connection()
+            source_pos = self._get_port_position(
+                conn.source.component_id,
+                conn.source.port_name,
+            )
+            target_pos = self._get_port_position(
+                conn.target.component_id,
+                conn.target.port_name,
+            )
+            if source_pos and target_pos:
+                conn_item.update_positions(
+                    QPointF(source_pos[0], source_pos[1]),
+                    QPointF(target_pos[0], target_pos[1]),
+                )
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse move for connection dragging."""
+        super().mouseMoveEvent(event)
+
+        # Update temporary connection line
+        if self._temp_connection:
+            self._temp_connection.set_end_pos(event.scenePos())
+
+            # Check if we're over a valid target port
+            items = self.items(event.scenePos())
+            target_port = None
+            for item in items:
+                if isinstance(item, PortItem) and item.is_input():
+                    target_port = item
+                    break
+
+            # Update port highlighting
+            for comp_item in self._component_items.values():
+                for port_item in comp_item._port_items.values():
+                    if port_item == target_port:
+                        is_valid = self._is_valid_connection_target(port_item)
+                        port_item.set_connection_target(True, is_valid)
+                        self._temp_connection.set_target_state(True, is_valid)
+                    else:
+                        port_item.set_connection_target(False)
+
+            if target_port is None:
+                self._temp_connection.set_target_state(False)
+
+        # Update connection positions when components are being moved
+        self.update_connection_positions()
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse release for connection creation."""
+        if self._temp_connection and self._connection_source_port:
+            # Check if we released over a valid input port
+            items = self.items(event.scenePos())
+            for item in items:
+                if isinstance(item, PortItem) and item.is_input():
+                    if self._is_valid_connection_target(item):
+                        self._create_connection(
+                            self._connection_source_port,
+                            self._connection_source_component_id,
+                            item,
+                        )
+                        self._cancel_connection()
+                        return
+
+            # No valid target - cancel connection
+            self._cancel_connection()
+
+        super().mouseReleaseEvent(event)
+
+    def _on_register_moved(self, instance: ComponentInstance, old_x: float) -> None:
+        """Handle a register being moved."""
         new_x = instance.position[0]
 
-        # Remove from old stage
         for stage in self._design.stages:
             if instance.id in stage.register_ids:
                 stage.register_ids.remove(instance.id)
                 break
 
-        # Check if there's an existing stage at the new position
         existing_stage = self._design.get_stage_at_x(new_x)
 
         if existing_stage is not None:
-            # Add to existing stage
             if instance.id not in existing_stage.register_ids:
                 existing_stage.register_ids.append(instance.id)
         else:
-            # Create new stage at this position
             new_stage = Stage(
-                index=0,  # Will be set by reindex
+                index=0,
                 x_position=new_x,
                 width=self._register_width,
                 register_ids=[instance.id],
             )
             self._design.stages.append(new_stage)
 
-        # Clean up empty stages
         self._design.remove_empty_stages()
-
-        # Reindex stages and rebuild visuals
         self._design.reindex_stages()
         self._update_all_pipeline_stages()
         self._rebuild_all_stages()
         self._update_register_displays()
-
         self.stages_changed.emit()
 
     def remove_component(self, component_id: UUID) -> bool:
@@ -289,7 +485,14 @@ class DesignScene(QGraphicsScene):
         instance = item.get_instance()
         is_register = instance.definition_ref == "Register"
 
-        # Remove from stage if it's a register
+        # Remove connections involving this component
+        conns_to_remove = [
+            conn.id for conn in self._design.connections
+            if conn.source.component_id == component_id or conn.target.component_id == component_id
+        ]
+        for conn_id in conns_to_remove:
+            self.remove_connection(conn_id)
+
         if is_register:
             for stage in self._design.stages:
                 if component_id in stage.register_ids:
@@ -300,7 +503,6 @@ class DesignScene(QGraphicsScene):
         del self._component_items[component_id]
         self._design.remove_component(component_id)
 
-        # Clean up stages if register was removed
         if is_register:
             self._design.remove_empty_stages()
             self._design.reindex_stages()
@@ -330,14 +532,7 @@ class DesignScene(QGraphicsScene):
         )
 
     def snap_register_x(self, x: float) -> float:
-        """Snap x coordinate for a register (stage-aware).
-
-        Args:
-            x: The x coordinate to snap.
-
-        Returns:
-            Snapped x coordinate (to stage or grid).
-        """
+        """Snap x coordinate for a register (stage-aware)."""
         stage = self._design.get_stage_at_x(x)
         if stage:
             return stage.x_position

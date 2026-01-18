@@ -1,10 +1,14 @@
 """Port graphics item for component blocks."""
 
+from typing import Callable
+from uuid import UUID
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsSceneMouseEvent,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -13,7 +17,10 @@ from pipeline_designer.domain.models import Port, PortDirection
 
 
 class PortItem(QGraphicsEllipseItem):
-    """Graphics item representing a port on a component."""
+    """Graphics item representing a port on a component.
+
+    Supports connection creation by dragging from output ports to input ports.
+    """
 
     PORT_RADIUS = 6.0
 
@@ -23,6 +30,8 @@ class PortItem(QGraphicsEllipseItem):
     COLOR_RESET = QColor("#c45911")  # Dark orange
     COLOR_INOUT = QColor("#7030a0")  # Purple
     COLOR_HOVER = QColor("#ffcc00")  # Yellow highlight
+    COLOR_CONNECT_VALID = QColor("#00ff00")  # Bright green for valid connection
+    COLOR_CONNECT_INVALID = QColor("#ff0000")  # Red for invalid connection
 
     def __init__(self, port: Port, parent: QGraphicsItem | None = None):
         """Initialize the port item.
@@ -41,6 +50,11 @@ class PortItem(QGraphicsEllipseItem):
 
         self._port = port
         self._is_hovered = False
+        self._is_connection_target = False
+        self._is_valid_target = False
+
+        # Callback for connection start (from output ports)
+        self.on_connection_start: Callable[[], None] | None = None
 
         self._setup_item()
 
@@ -57,6 +71,10 @@ class PortItem(QGraphicsEllipseItem):
 
     def _get_port_color(self) -> QColor:
         """Get the color for this port based on its type."""
+        if self._is_connection_target:
+            return self.COLOR_CONNECT_VALID if self._is_valid_target else self.COLOR_CONNECT_INVALID
+        if self._is_hovered:
+            return self.COLOR_HOVER
         if self._port.is_clock:
             return self.COLOR_CLOCK
         if self._port.is_reset:
@@ -70,8 +88,6 @@ class PortItem(QGraphicsEllipseItem):
     def _update_appearance(self) -> None:
         """Update the visual appearance of the port."""
         color = self._get_port_color()
-        if self._is_hovered:
-            color = self.COLOR_HOVER
 
         self.setBrush(QBrush(color))
         pen = QPen(color.darker(150))
@@ -82,17 +98,53 @@ class PortItem(QGraphicsEllipseItem):
         """Get the port model."""
         return self._port
 
-    def hoverEnterEvent(self, event) -> None:
+    def is_output(self) -> bool:
+        """Check if this is an output port."""
+        return self._port.direction == PortDirection.OUT
+
+    def is_input(self) -> bool:
+        """Check if this is an input port."""
+        return self._port.direction == PortDirection.IN
+
+    def get_component_id(self) -> UUID | None:
+        """Get the ID of the parent component instance."""
+        parent = self.parentItem()
+        if parent and hasattr(parent, "get_instance"):
+            return parent.get_instance().id
+        return None
+
+    def set_connection_target(self, is_target: bool, is_valid: bool = False) -> None:
+        """Set whether this port is being targeted for a connection.
+
+        Args:
+            is_target: Whether a connection is being dragged over this port.
+            is_valid: Whether this would be a valid connection target.
+        """
+        self._is_connection_target = is_target
+        self._is_valid_target = is_valid
+        self._update_appearance()
+
+    def hoverEnterEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle hover enter."""
         self._is_hovered = True
         self._update_appearance()
         super().hoverEnterEvent(event)
 
-    def hoverLeaveEvent(self, event) -> None:
+    def hoverLeaveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle hover leave."""
         self._is_hovered = False
         self._update_appearance()
         super().hoverLeaveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse press - start connection from output ports."""
+        if event.button() == Qt.MouseButton.LeftButton and self.is_output():
+            if self.on_connection_start:
+                self.on_connection_start()
+            # Don't call super or accept - let scene handle mouse tracking
+            # The scene will disable component movement
+            return
+        super().mousePressEvent(event)
 
     def paint(
         self,
