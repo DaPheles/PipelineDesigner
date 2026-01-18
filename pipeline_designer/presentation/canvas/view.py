@@ -1,9 +1,10 @@
 """Design canvas view with pan and zoom support."""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QGraphicsView
 
+from .items import ComponentItem, ConnectionItem
 from .scene import DesignScene
 
 
@@ -45,6 +46,7 @@ class DesignView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setAcceptDrops(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def wheelEvent(self, event) -> None:
         """Handle mouse wheel for zooming."""
@@ -100,6 +102,42 @@ class DesignView(QGraphicsView):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle key press events for deletion."""
+        if event.key() == Qt.Key.Key_Delete:
+            self._delete_selected_items()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def _delete_selected_items(self) -> None:
+        """Delete all selected items from the scene."""
+        scene = self.scene()
+        if not isinstance(scene, DesignScene):
+            return
+
+        selected_items = scene.selectedItems()
+        if not selected_items:
+            return
+
+        # Collect IDs to delete (components first, then connections)
+        component_ids = []
+        connection_ids = []
+
+        for item in selected_items:
+            if isinstance(item, ComponentItem):
+                component_ids.append(item.get_instance().id)
+            elif isinstance(item, ConnectionItem):
+                connection_ids.append(item.get_connection().id)
+
+        # Delete components (this also removes their connections)
+        for comp_id in component_ids:
+            scene.remove_component(comp_id)
+
+        # Delete remaining selected connections
+        for conn_id in connection_ids:
+            scene.remove_connection(conn_id)
 
     def fit_to_content(self) -> None:
         """Fit the view to show all content."""
