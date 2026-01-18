@@ -7,6 +7,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsRectItem,
+    QGraphicsSceneMouseEvent,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -64,6 +65,10 @@ class ComponentItem(QGraphicsRectItem):
 
         # Callback for stage-aware x snapping: (x) -> x
         self.snap_register_x: Callable[[float], float] | None = None
+
+        # Callbacks for undo tracking
+        self.on_move_start: Callable[[], None] | None = None
+        self.on_move_end: Callable[[], None] | None = None
 
         self._setup_item()
         self._create_ports()
@@ -278,3 +283,17 @@ class ComponentItem(QGraphicsRectItem):
             self.SELECTION_PADDING,
             self.SELECTION_PADDING,
         )
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse press - record start position for undo."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.on_move_start:
+                self.on_move_start()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Handle mouse release - record end position for undo."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.on_move_end:
+                self.on_move_end()
+        super().mouseReleaseEvent(event)

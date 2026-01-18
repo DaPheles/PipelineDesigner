@@ -104,12 +104,30 @@ class DesignView(QGraphicsView):
             super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Handle key press events for deletion."""
+        """Handle key press events for deletion and undo/redo."""
         if event.key() == Qt.Key.Key_Delete:
             self._delete_selected_items()
             event.accept()
+        elif event.key() == Qt.Key.Key_Z and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._undo()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Y and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._redo()
+            event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _undo(self) -> None:
+        """Undo the last action."""
+        scene = self.scene()
+        if isinstance(scene, DesignScene):
+            scene.undo()
+
+    def _redo(self) -> None:
+        """Redo the last undone action."""
+        scene = self.scene()
+        if isinstance(scene, DesignScene):
+            scene.redo()
 
     def _delete_selected_items(self) -> None:
         """Delete all selected items from the scene."""

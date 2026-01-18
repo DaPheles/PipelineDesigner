@@ -4,7 +4,7 @@ from uuid import UUID
 
 from PySide6.QtCore import QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 from pipeline_designer.domain.models import (
@@ -16,6 +16,14 @@ from pipeline_designer.domain.models import (
     Stage,
 )
 
+from .commands import (
+    AddComponentCommand,
+    AddConnectionCommand,
+    MoveComponentCommand,
+    RemoveComponentCommand,
+    RemoveConnectionCommand,
+    UndoStack,
+)
 from .items import ComponentItem, ConnectionItem, StageItem, TempConnectionItem
 from .items.port_item import PortItem
 
@@ -58,6 +66,12 @@ class DesignScene(QGraphicsScene):
         self._connection_source_port: PortItem | None = None
         self._connection_source_component_id: UUID | None = None
 
+        # Undo/Redo stack
+        self._undo_stack = UndoStack()
+
+        # Track component movement for undo
+        self._move_start_positions: dict[UUID, tuple[float, float]] = {}
+
         self._setup_scene()
 
     def _setup_scene(self) -> None:
@@ -88,6 +102,8 @@ class DesignScene(QGraphicsScene):
         self._component_items.clear()
         self._stage_items.clear()
         self._connection_items.clear()
+        self._undo_stack.clear()
+        self._move_start_positions.clear()
         self._design = design
 
         # Create stage items first (they're behind components)
@@ -108,10 +124,12 @@ class DesignScene(QGraphicsScene):
         self._component_items.clear()
         self._stage_items.clear()
         self._connection_items.clear()
+        self._undo_stack.clear()
+        self._move_start_positions.clear()
         self._design = Design()
 
     def add_component_at(self, component_name: str, x: float, y: float) -> ComponentItem | None:
-        """Add a component instance at the specified position.
+        """Add a component instance at the specified position (with undo support).
 
         For registers, this also handles stage assignment/creation.
 
@@ -127,15 +145,38 @@ class DesignScene(QGraphicsScene):
         if definition is None:
             return None
 
-        # Snap y to grid
+        # Snap coordinates
         if self._snap_to_grid:
             y = self._grid.snap_to_grid(y)
 
-        # For registers, handle stage-aware x positioning
         if component_name == "Register":
             x = self._get_register_x_position(x)
         elif self._snap_to_grid:
             x = self._grid.snap_to_grid(x)
+
+        # Use command for undo support
+        command = AddComponentCommand(scene=self, component_name=component_name, x=x, y=y)
+        self._undo_stack.push(command)
+
+        # Return the created item
+        if command._instance:
+            return self._component_items.get(command._instance.id)
+        return None
+
+    def _add_component_internal(self, component_name: str, x: float, y: float) -> ComponentItem | None:
+        """Internal method to add a component (used by commands).
+
+        Args:
+            component_name: Name of the component definition.
+            x: X position in pixels (already snapped).
+            y: Y position in pixels (already snapped).
+
+        Returns:
+            The created ComponentItem, or None if component not found.
+        """
+        definition = self._library.get(component_name)
+        if definition is None:
+            return None
 
         instance = ComponentInstance(
             definition_ref=component_name,
@@ -234,6 +275,10 @@ class DesignScene(QGraphicsScene):
         # Wire up port callbacks for connections
         self._wire_port_callbacks(item)
 
+        # Wire up move callbacks for undo tracking
+        item.on_move_start = lambda: self.record_move_start(instance.id)
+        item.on_move_end = lambda: self.record_move_end(instance.id)
+
         return item
 
     def _wire_port_callbacks(self, component_item: ComponentItem) -> None:
@@ -290,7 +335,7 @@ class DesignScene(QGraphicsScene):
         source_comp_id: UUID,
         target_port: PortItem,
     ) -> None:
-        """Create a new connection between ports."""
+        """Create a new connection between ports (with undo support)."""
         target_comp_id = target_port.get_component_id()
         if target_comp_id is None:
             return
@@ -306,9 +351,8 @@ class DesignScene(QGraphicsScene):
             ),
         )
 
-        self._design.add_connection(connection)
-        self._create_connection_item(connection)
-        self.connection_added.emit(connection)
+        command = AddConnectionCommand(scene=self, connection=connection)
+        self._undo_stack.push(command)
 
     def _create_connection_item(self, connection: Connection) -> ConnectionItem | None:
         """Create a graphics item for a connection."""
@@ -364,7 +408,17 @@ class DesignScene(QGraphicsScene):
             comp_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
 
     def remove_connection(self, connection_id: UUID) -> bool:
-        """Remove a connection from the scene."""
+        """Remove a connection from the scene (with undo support)."""
+        item = self._connection_items.get(connection_id)
+        if item is None:
+            return False
+
+        command = RemoveConnectionCommand(scene=self, connection_id=connection_id)
+        self._undo_stack.push(command)
+        return True
+
+    def _remove_connection_internal(self, connection_id: UUID) -> bool:
+        """Internal method to remove a connection (used by commands)."""
         item = self._connection_items.get(connection_id)
         if item is None:
             return False
@@ -374,6 +428,17 @@ class DesignScene(QGraphicsScene):
         self._design.remove_connection(connection_id)
         self.connection_removed.emit(connection_id)
         return True
+
+    def _add_connection_internal(self, connection: Connection) -> ConnectionItem | None:
+        """Internal method to add a connection (used by commands)."""
+        self._design.add_connection(connection)
+        item = self._create_connection_item(connection)
+        self.connection_added.emit(connection)
+        return item
+
+    def _restore_connection_internal(self, connection: Connection) -> ConnectionItem | None:
+        """Internal method to restore a connection (used by undo)."""
+        return self._add_connection_internal(connection)
 
     def update_connection_positions(self) -> None:
         """Update all connection positions after components move."""
@@ -477,7 +542,17 @@ class DesignScene(QGraphicsScene):
         self.stages_changed.emit()
 
     def remove_component(self, component_id: UUID) -> bool:
-        """Remove a component instance from the scene."""
+        """Remove a component instance from the scene (with undo support)."""
+        item = self._component_items.get(component_id)
+        if item is None:
+            return False
+
+        command = RemoveComponentCommand(scene=self, component_id=component_id)
+        self._undo_stack.push(command)
+        return True
+
+    def _remove_component_internal(self, component_id: UUID) -> bool:
+        """Internal method to remove a component (used by commands)."""
         item = self._component_items.get(component_id)
         if item is None:
             return False
@@ -485,13 +560,13 @@ class DesignScene(QGraphicsScene):
         instance = item.get_instance()
         is_register = instance.definition_ref == "Register"
 
-        # Remove connections involving this component
+        # Remove connections involving this component (without undo tracking)
         conns_to_remove = [
             conn.id for conn in self._design.connections
             if conn.source.component_id == component_id or conn.target.component_id == component_id
         ]
         for conn_id in conns_to_remove:
-            self.remove_connection(conn_id)
+            self._remove_connection_internal(conn_id)
 
         if is_register:
             for stage in self._design.stages:
@@ -512,6 +587,43 @@ class DesignScene(QGraphicsScene):
             self.stages_changed.emit()
 
         self.component_removed.emit(component_id)
+        return True
+
+    def _restore_component_internal(self, instance: ComponentInstance) -> ComponentItem | None:
+        """Internal method to restore a component (used by undo)."""
+        # Re-add to design
+        self._design.add_component(instance)
+
+        # Create the graphics item
+        item = self._create_component_item(instance)
+
+        # Handle stage assignment for registers
+        if instance.definition_ref == "Register":
+            self._assign_register_to_stage(instance)
+
+        self.component_added.emit(instance)
+        return item
+
+    def _move_component_internal(self, component_id: UUID, pos: tuple[float, float]) -> bool:
+        """Internal method to move a component (used by undo/redo)."""
+        item = self._component_items.get(component_id)
+        if item is None:
+            return False
+
+        instance = item.get_instance()
+        old_x = instance.position[0]
+        is_register = instance.definition_ref == "Register"
+
+        # Update position
+        instance.position = pos
+        item.setPos(pos[0], pos[1])
+
+        # Handle stage updates for registers
+        if is_register:
+            self._on_register_moved(instance, old_x)
+
+        # Update connections
+        self.update_connection_positions()
         return True
 
     def get_component_item(self, component_id: UUID) -> ComponentItem | None:
@@ -565,3 +677,68 @@ class DesignScene(QGraphicsScene):
         while y < rect.bottom():
             painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
             y += grid_size
+
+    # Undo/Redo methods
+
+    def undo(self) -> bool:
+        """Undo the last action."""
+        return self._undo_stack.undo()
+
+    def redo(self) -> bool:
+        """Redo the last undone action."""
+        return self._undo_stack.redo()
+
+    def can_undo(self) -> bool:
+        """Check if there are actions to undo."""
+        return self._undo_stack.can_undo()
+
+    def can_redo(self) -> bool:
+        """Check if there are actions to redo."""
+        return self._undo_stack.can_redo()
+
+    def get_undo_description(self) -> str | None:
+        """Get description of the next action to undo."""
+        return self._undo_stack.get_undo_description()
+
+    def get_redo_description(self) -> str | None:
+        """Get description of the next action to redo."""
+        return self._undo_stack.get_redo_description()
+
+    def clear_undo_stack(self) -> None:
+        """Clear all undo/redo history."""
+        self._undo_stack.clear()
+
+    # Component movement tracking for undo
+
+    def record_move_start(self, component_id: UUID) -> None:
+        """Record the start position of a component move."""
+        item = self._component_items.get(component_id)
+        if item:
+            instance = item.get_instance()
+            self._move_start_positions[component_id] = instance.position
+
+    def record_move_end(self, component_id: UUID) -> None:
+        """Record the end of a component move and create undo command."""
+        if component_id not in self._move_start_positions:
+            return
+
+        item = self._component_items.get(component_id)
+        if item is None:
+            del self._move_start_positions[component_id]
+            return
+
+        old_pos = self._move_start_positions[component_id]
+        new_pos = item.get_instance().position
+        del self._move_start_positions[component_id]
+
+        # Only create command if position actually changed
+        if old_pos != new_pos:
+            command = MoveComponentCommand(
+                scene=self,
+                component_id=component_id,
+                old_pos=old_pos,
+                new_pos=new_pos,
+            )
+            # Don't execute - movement already happened, just record for undo
+            self._undo_stack._undo_stack.append(command)
+            self._undo_stack._redo_stack.clear()
