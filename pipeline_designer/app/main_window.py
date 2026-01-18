@@ -1,0 +1,219 @@
+"""Main application window."""
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QFileDialog,
+    QMainWindow,
+    QMenuBar,
+    QMessageBox,
+    QStatusBar,
+    QWidget,
+)
+
+from pipeline_designer.domain.models import ComponentDefinition
+from pipeline_designer.infrastructure.persistence import LibraryLoader
+from pipeline_designer.presentation.canvas import DesignScene, DesignView
+from pipeline_designer.presentation.panels import ComponentPalette
+
+from .config import AppConfig
+
+
+class MainWindow(QMainWindow):
+    """Main application window."""
+
+    def __init__(
+        self,
+        config: AppConfig | None = None,
+        parent: QWidget | None = None,
+    ):
+        """Initialize the main window.
+
+        Args:
+            config: Application configuration.
+            parent: Parent widget.
+        """
+        super().__init__(parent)
+
+        self._config = config or AppConfig()
+        self._library_loader = LibraryLoader()
+        self._current_file: Path | None = None
+
+        self._setup_ui()
+        self._setup_menus()
+        self._setup_status_bar()
+        self._load_library()
+        self._update_title()
+
+    def _setup_ui(self) -> None:
+        """Set up the user interface."""
+        self.setMinimumSize(800, 600)
+        self.resize(self._config.window.width, self._config.window.height)
+
+        self._scene = DesignScene()
+        self._view = DesignView(self._scene)
+        self.setCentralWidget(self._view)
+
+        self._palette = ComponentPalette()
+        self._palette_dock = QDockWidget("Components", self)
+        self._palette_dock.setWidget(self._palette)
+        self._palette_dock.setMinimumWidth(200)
+        self._palette_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._palette_dock)
+
+        self._view.zoom_changed.connect(self._on_zoom_changed)
+
+    def _setup_menus(self) -> None:
+        """Set up the menu bar."""
+        menu_bar = QMenuBar(self)
+        self.setMenuBar(menu_bar)
+
+        file_menu = menu_bar.addMenu("&File")
+
+        new_action = QAction("&New", self)
+        new_action.setShortcut(QKeySequence.StandardKey.New)
+        new_action.triggered.connect(self._on_new)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("&Open...", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._on_open)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        save_action = QAction("&Save", self)
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self._on_save)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("Save &As...", self)
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.triggered.connect(self._on_save_as)
+        file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        view_menu = menu_bar.addMenu("&View")
+
+        fit_action = QAction("&Fit to Content", self)
+        fit_action.setShortcut(QKeySequence("Ctrl+0"))
+        fit_action.triggered.connect(self._view.fit_to_content)
+        view_menu.addAction(fit_action)
+
+        reset_zoom_action = QAction("&Reset Zoom", self)
+        reset_zoom_action.setShortcut(QKeySequence("Ctrl+1"))
+        reset_zoom_action.triggered.connect(self._view.reset_zoom)
+        view_menu.addAction(reset_zoom_action)
+
+    def _setup_status_bar(self) -> None:
+        """Set up the status bar."""
+        self._status_bar = QStatusBar(self)
+        self.setStatusBar(self._status_bar)
+        self._status_bar.showMessage("Ready")
+
+    def _load_library(self) -> None:
+        """Load the component library."""
+        library_path = self._config.library_path
+        if library_path is None:
+            library_path = AppConfig.get_default_library_path()
+
+        self._library_loader = LibraryLoader(library_path)
+        self._library_loader.load_all()
+
+        components = self._library_loader.get_all_components()
+        self._palette.set_components(components)
+
+        library_dict: dict[str, ComponentDefinition] = {
+            c.name: c for c in components
+        }
+        self._scene.set_library(library_dict)
+
+        self._status_bar.showMessage(f"Loaded {len(components)} components")
+
+    def _update_title(self) -> None:
+        """Update the window title."""
+        title = self._config.window.title
+        design_name = self._scene.get_design().name
+
+        if self._current_file:
+            title = f"{self._current_file.name} - {title}"
+        else:
+            title = f"{design_name} - {title}"
+
+        self.setWindowTitle(title)
+
+    def _on_new(self) -> None:
+        """Handle new design action."""
+        self._scene.new_design()
+        self._current_file = None
+        self._update_title()
+        self._status_bar.showMessage("New design created")
+
+    def _on_open(self) -> None:
+        """Handle open design action."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Design",
+            str(Path.home()),
+            "Pipeline Design (*.json);;All Files (*)",
+        )
+
+        if file_path:
+            self._status_bar.showMessage(f"Open: {file_path} (not yet implemented)")
+
+    def _on_save(self) -> None:
+        """Handle save design action."""
+        if self._current_file:
+            self._save_to_file(self._current_file)
+        else:
+            self._on_save_as()
+
+    def _on_save_as(self) -> None:
+        """Handle save as action."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Design",
+            str(Path.home()),
+            "Pipeline Design (*.json);;All Files (*)",
+        )
+
+        if file_path:
+            self._save_to_file(Path(file_path))
+
+    def _save_to_file(self, path: Path) -> None:
+        """Save the design to a file."""
+        try:
+            design = self._scene.get_design()
+            json_str = design.model_dump_json(indent=2)
+            path.write_text(json_str)
+
+            self._current_file = path
+            self._config.add_recent_file(path)
+            self._update_title()
+            self._status_bar.showMessage(f"Saved to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+
+    def _on_zoom_changed(self, zoom: float) -> None:
+        """Handle zoom level changes."""
+        self._status_bar.showMessage(f"Zoom: {zoom * 100:.0f}%")
+
+    def get_scene(self) -> DesignScene:
+        """Get the design scene."""
+        return self._scene
+
+    def get_view(self) -> DesignView:
+        """Get the design view."""
+        return self._view

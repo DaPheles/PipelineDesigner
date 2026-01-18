@@ -1,0 +1,44 @@
+{
+    "name": "Mux2",
+    "category": "primitives",
+    "description": "2:1 multiplexer",
+    "ports": [
+        {
+            "name": "sel",
+            "direction": "in",
+            "data_type": "std_logic",
+            "position": [2, 0]
+        },
+        {
+            "name": "a",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 1]
+        },
+        {
+            "name": "b",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 3]
+        },
+        {
+            "name": "y",
+            "direction": "out",
+            "data_type": "std_logic_vector",
+            "position": [4, 2]
+        }
+    ],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 8
+        }
+    ],
+    "visual": {
+        "width": 4,
+        "height": 4,
+        "color": "#70ad47"
+    },
+    "latency": 0
+}

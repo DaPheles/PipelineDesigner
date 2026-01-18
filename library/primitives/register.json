@@ -1,0 +1,46 @@
+{
+    "name": "Register",
+    "category": "primitives",
+    "description": "Basic D flip-flop register with synchronous reset",
+    "ports": [
+        {
+            "name": "clk",
+            "direction": "in",
+            "data_type": "std_logic",
+            "position": [0, 1],
+            "is_clock": true
+        },
+        {
+            "name": "rst",
+            "direction": "in",
+            "data_type": "std_logic",
+            "position": [1, 0],
+            "is_reset": true
+        },
+        {
+            "name": "d",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 2]
+        },
+        {
+            "name": "q",
+            "direction": "out",
+            "data_type": "std_logic_vector",
+            "position": [5, 2]
+        }
+    ],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 8
+        }
+    ],
+    "visual": {
+        "width": 5,
+        "height": 3,
+        "color": "#5b9bd5"
+    },
+    "latency": 1
+}

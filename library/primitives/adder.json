@@ -1,0 +1,44 @@
+{
+    "name": "Adder",
+    "category": "primitives",
+    "description": "Simple adder with carry out",
+    "ports": [
+        {
+            "name": "a",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 1]
+        },
+        {
+            "name": "b",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 3]
+        },
+        {
+            "name": "sum",
+            "direction": "out",
+            "data_type": "std_logic_vector",
+            "position": [5, 1]
+        },
+        {
+            "name": "cout",
+            "direction": "out",
+            "data_type": "std_logic",
+            "position": [5, 3]
+        }
+    ],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 8
+        }
+    ],
+    "visual": {
+        "width": 5,
+        "height": 4,
+        "color": "#ed7d31"
+    },
+    "latency": 0
+}
