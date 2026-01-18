@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 from pipeline_designer.domain.models import ComponentDefinition, Design
 from pipeline_designer.infrastructure.persistence import LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
-from pipeline_designer.presentation.panels import ComponentPalette
+from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem
+from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
 
 from .config import AppConfig
 
@@ -67,7 +68,20 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._palette_dock)
 
+        # Property editor panel (right dock)
+        self._property_editor = PropertyEditor()
+        self._property_dock = QDockWidget("Properties", self)
+        self._property_dock.setWidget(self._property_editor)
+        self._property_dock.setMinimumWidth(200)
+        self._property_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._property_dock)
+
+        # Connect signals
         self._view.zoom_changed.connect(self._on_zoom_changed)
+        self._scene.selectionChanged.connect(self._on_selection_changed)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -227,6 +241,37 @@ class MainWindow(QMainWindow):
     def _on_zoom_changed(self, zoom: float) -> None:
         """Handle zoom level changes."""
         self._status_bar.showMessage(f"Zoom: {zoom * 100:.0f}%")
+
+    def _on_selection_changed(self) -> None:
+        """Handle scene selection changes."""
+        selected = self._scene.selectedItems()
+
+        # Clear if nothing or multiple items selected
+        if len(selected) != 1:
+            self._property_editor.clear()
+            return
+
+        item = selected[0]
+
+        if isinstance(item, ComponentItem):
+            instance = item.get_instance()
+            definition = item.get_definition()
+            self._property_editor.set_component(instance, definition)
+        elif isinstance(item, ConnectionItem):
+            connection = item.get_connection()
+            # Get display names for source and target components
+            source_name = self._get_component_display_name(connection.source.component_id)
+            target_name = self._get_component_display_name(connection.target.component_id)
+            self._property_editor.set_connection(connection, source_name, target_name)
+        else:
+            self._property_editor.clear()
+
+    def _get_component_display_name(self, component_id) -> str:
+        """Get display name for a component by ID."""
+        item = self._scene.get_component_item(component_id)
+        if item:
+            return item.get_instance().get_display_name()
+        return str(component_id)[:8]
 
     def get_scene(self) -> DesignScene:
         """Get the design scene."""

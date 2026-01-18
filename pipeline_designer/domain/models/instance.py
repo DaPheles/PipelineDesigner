@@ -44,6 +44,15 @@ class Connection(BaseModel):
     id: UUID = Field(default_factory=uuid4, description="Unique connection ID")
     source: PortReference = Field(..., description="Source port reference")
     target: PortReference = Field(..., description="Target port reference")
+    signal_name: str | None = Field(
+        default=None, description="Optional signal/wire name"
+    )
     waypoints: list[tuple[float, float]] = Field(
         default_factory=list, description="Intermediate routing points"
     )
+
+    def get_display_name(self) -> str:
+        """Get the display name for this connection."""
+        if self.signal_name:
+            return self.signal_name
+        return f"wire_{str(self.id)[:8]}"
