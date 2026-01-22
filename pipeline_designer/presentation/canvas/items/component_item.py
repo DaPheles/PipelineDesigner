@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
-from pipeline_designer.domain.models import ComponentDefinition, ComponentInstance, PortDirection
+from pipeline_designer.domain.models import ComponentDefinition, ComponentInstance, Design, PortDirection
 
+from .composite_view_item import CompositeViewItem
 from .port_item import PortItem
 
 
@@ -39,6 +40,8 @@ class ComponentItem(QGraphicsRectItem):
         definition: ComponentDefinition | None = None,
         grid: GridConfig | None = None,
         snap_to_grid: bool = True,
+        composite_design: Design | None = None,
+        library: dict[str, ComponentDefinition] | None = None,
         parent: QGraphicsItem | None = None,
     ):
         """Initialize the component item.
@@ -48,6 +51,8 @@ class ComponentItem(QGraphicsRectItem):
             definition: The component definition (optional).
             grid: Grid configuration for unit conversion.
             snap_to_grid: Whether to snap to grid when moving (default True).
+            composite_design: For composite components, the internal design.
+            library: Component library for looking up definitions.
             parent: Parent graphics item.
         """
         super().__init__(parent)
@@ -60,6 +65,9 @@ class ComponentItem(QGraphicsRectItem):
         self._is_register = instance.definition_ref == "Register"
         self._is_composite = instance.is_composite
         self._last_x: float = instance.position[0]
+        self._composite_design = composite_design
+        self._library = library or {}
+        self._composite_view: CompositeViewItem | None = None
 
         # Callback for register movement: (instance, old_x) -> None
         self.register_moved: Callable[[ComponentInstance, float], None] | None = None
@@ -73,6 +81,7 @@ class ComponentItem(QGraphicsRectItem):
 
         self._setup_item()
         self._create_ports()
+        self._create_composite_view()
 
     def _setup_item(self) -> None:
         """Configure item settings."""
@@ -163,6 +172,21 @@ class ComponentItem(QGraphicsRectItem):
             else:
                 y_units = 1 + index
         return self._grid.to_pixels(y_units)
+
+    def _create_composite_view(self) -> None:
+        """Create the composite view for visualizing internal structure."""
+        if not self._is_composite or not self._composite_design:
+            return
+
+        # Create the composite view as a child item
+        rect = self.rect()
+        self._composite_view = CompositeViewItem(
+            design=self._composite_design,
+            library=self._library,
+            bounds=rect,
+            grid=self._grid,
+            parent=self,
+        )
 
     def get_instance(self) -> ComponentInstance:
         """Get the component instance model."""

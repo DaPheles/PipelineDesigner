@@ -111,14 +111,17 @@ class LibraryLoader:
         # Convert interface ports to component ports
         ports: list[Port] = []
         config = design.component_config
-        height = config.height
+
+        # Use the design's visual extent for sizing
+        visual_width = design.visual.width if design.visual.width > 0 else config.width
+        visual_height = design.visual.height if design.visual.height > 0 else config.height
 
         # Calculate port positions
         input_ports = design.get_input_interfaces()
         output_ports = design.get_output_interfaces()
 
         for i, iface in enumerate(input_ports):
-            y_pos = self._calculate_port_y(i, len(input_ports), height)
+            y_pos = self._calculate_port_y(i, len(input_ports), visual_height)
             port = Port(
                 name=iface.name,
                 direction=PortDirection.IN,
@@ -128,14 +131,19 @@ class LibraryLoader:
             ports.append(port)
 
         for i, iface in enumerate(output_ports):
-            y_pos = self._calculate_port_y(i, len(output_ports), height)
+            y_pos = self._calculate_port_y(i, len(output_ports), visual_height)
             port = Port(
                 name=iface.name,
                 direction=PortDirection.OUT,
                 data_type=iface.data_type,
-                position=(config.width, y_pos) if iface.position is None else (config.width, iface.position[1]),
+                position=(visual_width, y_pos) if iface.position is None else (visual_width, iface.position[1]),
             )
             ports.append(port)
+
+        # Use the design's visual extent for the component size
+        # This ensures the component is large enough to show internal structure
+        visual_width = design.visual.width if design.visual.width > 0 else config.width
+        visual_height = design.visual.height if design.visual.height > 0 else config.height
 
         # Create component definition
         component = ComponentDefinition(
@@ -145,8 +153,8 @@ class LibraryLoader:
             ports=ports,
             generics=[],  # Composite components inherit generics from sub-components
             visual=VisualConfig(
-                width=config.width,
-                height=config.height,
+                width=visual_width,
+                height=visual_height,
                 color=config.color,
             ),
             latency=design.latency,

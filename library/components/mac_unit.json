@@ -1,153 +1,286 @@
 {
-    "name": "MACUnit",
-    "components": [
-        {
-            "id": "a0ac0001-0001-0001-0001-000000000001",
-            "definition_ref": "Adder",
-            "position": [40, 40],
-            "generic_values": {"WIDTH": 16},
-            "instance_name": "multiplier"
-        },
-        {
-            "id": "a0ac0002-0002-0002-0002-000000000002",
-            "definition_ref": "Register",
-            "position": [160, 20],
-            "generic_values": {"WIDTH": 16},
-            "instance_name": "mult_reg",
-            "pipeline_stage": 1
-        },
-        {
-            "id": "a0ac0003-0003-0003-0003-000000000003",
-            "definition_ref": "Adder",
-            "position": [240, 40],
-            "generic_values": {"WIDTH": 16},
-            "instance_name": "accumulator"
-        },
-        {
-            "id": "a0ac0004-0004-0004-0004-000000000004",
-            "definition_ref": "Register",
-            "position": [360, 20],
-            "generic_values": {"WIDTH": 16},
-            "instance_name": "acc_reg",
-            "pipeline_stage": 2
-        }
-    ],
-    "connections": [
-        {
-            "id": "c00aa001-0001-0001-0001-000000000001",
-            "source": {
-                "component_id": "a0ac0001-0001-0001-0001-000000000001",
-                "port_name": "sum"
-            },
-            "target": {
-                "component_id": "a0ac0002-0002-0002-0002-000000000002",
-                "port_name": "d"
-            },
-            "signal_name": "mult_result"
-        },
-        {
-            "id": "c00aa002-0002-0002-0002-000000000002",
-            "source": {
-                "component_id": "a0ac0002-0002-0002-0002-000000000002",
-                "port_name": "q"
-            },
-            "target": {
-                "component_id": "a0ac0003-0003-0003-0003-000000000003",
-                "port_name": "a"
-            },
-            "signal_name": "mult_piped"
-        },
-        {
-            "id": "c00aa003-0003-0003-0003-000000000003",
-            "source": {
-                "component_id": "a0ac0003-0003-0003-0003-000000000003",
-                "port_name": "sum"
-            },
-            "target": {
-                "component_id": "a0ac0004-0004-0004-0004-000000000004",
-                "port_name": "d"
-            },
-            "signal_name": "acc_result"
-        }
-    ],
-    "stages": [
-        {
-            "id": "500a0001-0001-0001-0001-000000000001",
-            "index": 1,
-            "x_position": 160,
-            "width": 80,
-            "register_ids": ["a0ac0002-0002-0002-0002-000000000002"]
-        },
-        {
-            "id": "500a0002-0002-0002-0002-000000000002",
-            "index": 2,
-            "x_position": 360,
-            "width": 80,
-            "register_ids": ["a0ac0004-0004-0004-0004-000000000004"]
-        }
-    ],
-    "interface_ports": [
-        {
-            "id": "100a0001-0001-0001-0001-000000000001",
-            "name": "a",
-            "direction": "input",
-            "data_type": "std_logic_vector",
-            "position": [0, 2],
-            "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
-            "internal_port_name": "a"
-        },
-        {
-            "id": "100a0002-0002-0002-0002-000000000002",
-            "name": "b",
-            "direction": "input",
-            "data_type": "std_logic_vector",
-            "position": [0, 4],
-            "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
-            "internal_port_name": "b"
-        },
-        {
-            "id": "100a0003-0003-0003-0003-000000000003",
-            "name": "acc_in",
-            "direction": "input",
-            "data_type": "std_logic_vector",
-            "position": [0, 6],
-            "internal_component_id": "a0ac0003-0003-0003-0003-000000000003",
-            "internal_port_name": "b"
-        },
-        {
-            "id": "100a0004-0004-0004-0004-000000000004",
-            "name": "clk",
-            "direction": "input",
-            "data_type": "std_logic"
-        },
-        {
-            "id": "100a0005-0005-0005-0005-000000000005",
-            "name": "rst",
-            "direction": "input",
-            "data_type": "std_logic"
-        },
-        {
-            "id": "000a0001-0001-0001-0001-000000000001",
-            "name": "result",
-            "direction": "output",
-            "data_type": "std_logic_vector",
-            "position": [10, 4],
-            "internal_component_id": "a0ac0004-0004-0004-0004-000000000004",
-            "internal_port_name": "q"
-        }
-    ],
-    "component_config": {
-        "enabled": true,
-        "category": "components",
-        "description": "2-stage pipelined multiply-accumulate unit",
-        "color": "#e74c3c",
-        "width": 10,
-        "height": 8
+  "name": "MACUnit",
+  "components": [
+    {
+      "id": "a0ac0001-0001-0001-0001-000000000001",
+      "definition_ref": "Adder",
+      "position": [
+        -100.0,
+        -120.0
+      ],
+      "generic_values": {
+        "WIDTH": 16
+      },
+      "pipeline_stage": null,
+      "instance_name": "multiplier",
+      "is_composite": false,
+      "stage_count": 1
     },
-    "metadata": {
-        "created_at": "2024-01-01T00:00:00",
-        "modified_at": "2024-01-01T00:00:00",
-        "author": "Pipeline Designer",
-        "version": "1.0.0"
+    {
+      "id": "a0ac0002-0002-0002-0002-000000000002",
+      "definition_ref": "Register",
+      "position": [
+        60.0,
+        -120.0
+      ],
+      "generic_values": {
+        "WIDTH": 16
+      },
+      "pipeline_stage": 1,
+      "instance_name": "mult_reg",
+      "is_composite": false,
+      "stage_count": 1
+    },
+    {
+      "id": "a0ac0003-0003-0003-0003-000000000003",
+      "definition_ref": "Adder",
+      "position": [
+        200.0,
+        60.0
+      ],
+      "generic_values": {
+        "WIDTH": 16
+      },
+      "pipeline_stage": null,
+      "instance_name": "accumulator",
+      "is_composite": false,
+      "stage_count": 1
+    },
+    {
+      "id": "a0ac0004-0004-0004-0004-000000000004",
+      "definition_ref": "Register",
+      "position": [
+        360.0,
+        20.0
+      ],
+      "generic_values": {
+        "WIDTH": 16
+      },
+      "pipeline_stage": 2,
+      "instance_name": "acc_reg",
+      "is_composite": false,
+      "stage_count": 1
     }
+  ],
+  "connections": [
+    {
+      "id": "c00aa001-0001-0001-0001-000000000001",
+      "source": {
+        "component_id": "a0ac0001-0001-0001-0001-000000000001",
+        "port_name": "sum",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "a0ac0002-0002-0002-0002-000000000002",
+        "port_name": "d",
+        "interface_port_id": null
+      },
+      "signal_name": "mult_result",
+      "waypoints": []
+    },
+    {
+      "id": "c00aa002-0002-0002-0002-000000000002",
+      "source": {
+        "component_id": "a0ac0002-0002-0002-0002-000000000002",
+        "port_name": "q",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "a0ac0003-0003-0003-0003-000000000003",
+        "port_name": "a",
+        "interface_port_id": null
+      },
+      "signal_name": "mult_piped",
+      "waypoints": []
+    },
+    {
+      "id": "c00aa003-0003-0003-0003-000000000003",
+      "source": {
+        "component_id": "a0ac0003-0003-0003-0003-000000000003",
+        "port_name": "sum",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "a0ac0004-0004-0004-0004-000000000004",
+        "port_name": "d",
+        "interface_port_id": null
+      },
+      "signal_name": "acc_result",
+      "waypoints": []
+    },
+    {
+      "id": "7fdbdea7-635e-441e-9ef5-37883e8b0b7e",
+      "source": {
+        "component_id": "a0ac0004-0004-0004-0004-000000000004",
+        "port_name": "q",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": null,
+        "port_name": "result",
+        "interface_port_id": "000a0001-0001-0001-0001-000000000001"
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "8af331fe-eb66-4a73-a5fb-f94bfdc7eb90",
+      "source": {
+        "component_id": null,
+        "port_name": "a",
+        "interface_port_id": "100a0001-0001-0001-0001-000000000001"
+      },
+      "target": {
+        "component_id": "a0ac0001-0001-0001-0001-000000000001",
+        "port_name": "a",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "59a3030b-e89f-4817-99d1-99973da7c193",
+      "source": {
+        "component_id": null,
+        "port_name": "acc_in",
+        "interface_port_id": "100a0003-0003-0003-0003-000000000003"
+      },
+      "target": {
+        "component_id": "a0ac0001-0001-0001-0001-000000000001",
+        "port_name": "b",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "5d0d31fa-5ab8-4e75-b7b2-bcbd8fbbe81d",
+      "source": {
+        "component_id": null,
+        "port_name": "b",
+        "interface_port_id": "100a0002-0002-0002-0002-000000000002"
+      },
+      "target": {
+        "component_id": "a0ac0003-0003-0003-0003-000000000003",
+        "port_name": "b",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    }
+  ],
+  "stages": [
+    {
+      "id": "66eafdcd-d23f-4a6d-bdc2-633dff9f9f53",
+      "index": 1,
+      "x_position": 60.0,
+      "width": 80.0,
+      "register_ids": [
+        "a0ac0002-0002-0002-0002-000000000002"
+      ]
+    },
+    {
+      "id": "500a0002-0002-0002-0002-000000000002",
+      "index": 2,
+      "x_position": 360.0,
+      "width": 80.0,
+      "register_ids": [
+        "a0ac0004-0004-0004-0004-000000000004"
+      ]
+    }
+  ],
+  "interface_ports": [
+    {
+      "id": "100a0001-0001-0001-0001-000000000001",
+      "name": "a",
+      "direction": "input",
+      "data_type": "std_logic_vector",
+      "position": [
+        -11,
+        -7
+      ],
+      "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
+      "internal_port_name": "a"
+    },
+    {
+      "id": "100a0002-0002-0002-0002-000000000002",
+      "name": "b",
+      "direction": "input",
+      "data_type": "std_logic_vector",
+      "position": [
+        -11,
+        -3
+      ],
+      "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
+      "internal_port_name": "b"
+    },
+    {
+      "id": "100a0003-0003-0003-0003-000000000003",
+      "name": "acc_in",
+      "direction": "input",
+      "data_type": "std_logic_vector",
+      "position": [
+        -11,
+        1
+      ],
+      "internal_component_id": "a0ac0003-0003-0003-0003-000000000003",
+      "internal_port_name": "b"
+    },
+    {
+      "id": "100a0004-0004-0004-0004-000000000004",
+      "name": "clk",
+      "direction": "input",
+      "data_type": "std_logic",
+      "position": [
+        -11,
+        5
+      ],
+      "internal_component_id": null,
+      "internal_port_name": null
+    },
+    {
+      "id": "100a0005-0005-0005-0005-000000000005",
+      "name": "rst",
+      "direction": "input",
+      "data_type": "std_logic",
+      "position": [
+        -11,
+        9
+      ],
+      "internal_component_id": null,
+      "internal_port_name": null
+    },
+    {
+      "id": "000a0001-0001-0001-0001-000000000001",
+      "name": "result",
+      "direction": "output",
+      "data_type": "std_logic_vector",
+      "position": [
+        30,
+        1
+      ],
+      "internal_component_id": "a0ac0004-0004-0004-0004-000000000004",
+      "internal_port_name": "q"
+    }
+  ],
+  "component_config": {
+    "enabled": true,
+    "category": "components",
+    "description": "2-stage pipelined multiply-accumulate unit",
+    "color": "#e74c3c",
+    "width": 10,
+    "height": 8
+  },
+  "visual": {
+    "width": 43,
+    "height": 25,
+    "input_stage_x": -11,
+    "output_stage_x": 32
+  },
+  "metadata": {
+    "created_at": "2024-01-01T00:00:00",
+    "modified_at": "2026-01-22T19:16:08.817933",
+    "author": "Pipeline Designer",
+    "version": "1.0.0"
+  }
 }

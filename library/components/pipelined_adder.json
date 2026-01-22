@@ -6,7 +6,7 @@
       "definition_ref": "Adder",
       "position": [
         -40.0,
-        40.0
+        0.0
       ],
       "generic_values": {
         "WIDTH": 8
@@ -20,8 +20,8 @@
       "id": "22222222-2222-2222-2222-222222222222",
       "definition_ref": "Register",
       "position": [
-        180.0,
-        -80.0
+        160.0,
+        -100.0
       ],
       "generic_values": {
         "WIDTH": 8
@@ -111,9 +111,9 @@
   ],
   "stages": [
     {
-      "id": "761492e6-5620-4304-990f-e9db83e5c319",
+      "id": "5e11ee7d-0846-4c06-936c-bb8845c28e45",
       "index": 1,
-      "x_position": 180.0,
+      "x_position": 160.0,
       "width": 80.0,
       "register_ids": [
         "22222222-2222-2222-2222-222222222222"
@@ -128,7 +128,7 @@
       "data_type": "std_logic_vector",
       "position": [
         -10,
-        -5
+        4
       ],
       "internal_component_id": "11111111-1111-1111-1111-111111111111",
       "internal_port_name": "a"
@@ -139,8 +139,8 @@
       "direction": "input",
       "data_type": "std_logic_vector",
       "position": [
-        -10,
-        0
+        -8,
+        -2
       ],
       "internal_component_id": "11111111-1111-1111-1111-111111111111",
       "internal_port_name": "b"
@@ -151,8 +151,8 @@
       "direction": "input",
       "data_type": "std_logic",
       "position": [
-        -10,
-        3
+        -8,
+        1
       ],
       "internal_component_id": "22222222-2222-2222-2222-222222222222",
       "internal_port_name": "clk"
@@ -163,8 +163,8 @@
       "direction": "input",
       "data_type": "std_logic",
       "position": [
-        -10,
-        7
+        -8,
+        5
       ],
       "internal_component_id": "22222222-2222-2222-2222-222222222222",
       "internal_port_name": "rst"
@@ -175,8 +175,8 @@
       "direction": "output",
       "data_type": "std_logic_vector",
       "position": [
-        20,
-        -2
+        16,
+        -3
       ],
       "internal_component_id": "22222222-2222-2222-2222-222222222222",
       "internal_port_name": "q"
@@ -187,8 +187,8 @@
       "direction": "output",
       "data_type": "std_logic",
       "position": [
-        20,
-        4
+        16,
+        3
       ],
       "internal_component_id": "11111111-1111-1111-1111-111111111111",
       "internal_port_name": "cout"
@@ -203,14 +203,14 @@
     "height": 6
   },
   "visual": {
-    "width": 32,
-    "height": 21,
-    "input_stage_x": -10,
-    "output_stage_x": 22
+    "width": 26,
+    "height": 20,
+    "input_stage_x": -8,
+    "output_stage_x": 18
   },
   "metadata": {
     "created_at": "2024-01-01T00:00:00",
-    "modified_at": "2026-01-22T07:56:12.352108",
+    "modified_at": "2026-01-22T19:17:53.994668",
     "author": "Pipeline Designer",
     "version": "1.0.0"
   }

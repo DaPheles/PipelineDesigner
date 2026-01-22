@@ -150,13 +150,10 @@ class MainWindow(QMainWindow):
         self._palette.set_components(components)
 
         # Set library on scene with loader for composite component support
-        library_dict = {c.name: c for c in components}
-        self._scene.set_library(library_dict, self._library_loader)
-
         library_dict: dict[str, ComponentDefinition] = {
             c.name: c for c in components
         }
-        self._scene.set_library(library_dict)
+        self._scene.set_library(library_dict, self._library_loader)
 
         self._status_bar.showMessage(f"Loaded {len(components)} components")
 

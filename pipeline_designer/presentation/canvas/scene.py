@@ -326,6 +326,8 @@ class DesignScene(QGraphicsScene):
 
         Only ComponentItems (primitives/components) affect the vertical extent,
         not the register stage items which extend independently.
+
+        Also auto-fits the input/output stages to contain all components.
         """
         if not self._component_bounds or not self._input_stage or not self._output_stage:
             return
@@ -336,7 +338,10 @@ class DesignScene(QGraphicsScene):
             rect = comp_item.sceneBoundingRect()
             component_rects.append(rect)
 
-        # Update bounds based on component positions only
+        # Auto-fit input/output stages to contain all components
+        self._auto_fit_interface_stages(component_rects)
+
+        # Get updated positions after auto-fit
         input_x = self._input_stage.get_x_position()
         output_x = self._output_stage.get_x_position()
 
@@ -358,6 +363,40 @@ class DesignScene(QGraphicsScene):
 
         # Update the design's visual extent
         self._update_visual_extent(input_x, output_x, top_y, bottom_y)
+
+    def _auto_fit_interface_stages(self, component_rects: list[QRectF]) -> None:
+        """Auto-fit input/output stages to contain all components.
+
+        Args:
+            component_rects: List of component bounding rectangles.
+        """
+        if not component_rects or not self._input_stage or not self._output_stage:
+            return
+
+        # Find the leftmost and rightmost component extents
+        min_x = min(rect.left() for rect in component_rects)
+        max_x = max(rect.right() for rect in component_rects)
+
+        # Add padding
+        padding = self._grid.to_pixels(2)
+
+        # Get current stage positions
+        input_x = self._input_stage.get_x_position()
+        output_x = self._output_stage.get_x_position()
+
+        # Calculate where stages should be
+        required_input_x = min_x - InterfaceStageItem.STAGE_WIDTH - padding
+        required_output_x = max_x + padding
+
+        # Move input stage left if components extend beyond it
+        if required_input_x < input_x:
+            snapped_x = self._grid.snap_to_grid(required_input_x)
+            self._input_stage.setX(snapped_x)
+
+        # Move output stage right if components extend beyond it
+        if required_output_x > output_x:
+            snapped_x = self._grid.snap_to_grid(required_output_x)
+            self._output_stage.setX(snapped_x)
 
     def _update_visual_extent(
         self, input_x: float, output_x: float, top_y: float, bottom_y: float
@@ -599,20 +638,109 @@ class DesignScene(QGraphicsScene):
         x = instance.position[0]
         stage_count = instance.stage_count
 
-        # Find the stage at the component's position
+        # Find the stage at or nearest to the component's position
         first_stage = self._design.get_stage_at_x(x)
 
         if first_stage is not None:
-            # Align to existing stage
+            # Align component position to the stage
             instance.pipeline_stage = first_stage.index
 
-            # Check if we need to ensure enough stages exist
-            # For now, composite components align to stages but don't create them
-            # Stages are created by registers
+            # Snap component x position to stage
+            item = self._component_items.get(instance.id)
+            if item:
+                item.setPos(first_stage.x_position, instance.position[1])
+                instance.position = (first_stage.x_position, instance.position[1])
+
+            # Check if we need more stages for this component's latency
+            required_stages = first_stage.index + stage_count
+            current_stage_count = len(self._design.stages)
+
+            if required_stages > current_stage_count:
+                # Create additional stages
+                self._create_stages_for_composite(first_stage.index, stage_count)
         else:
-            # No stage at position - component is in a "stageless" area
-            # It will be aligned when registers create stages
-            instance.pipeline_stage = None
+            # No stage exists yet - create stages based on latency
+            if stage_count > 0:
+                # Create stages for the composite component
+                self._create_stages_for_composite_at_position(x, stage_count, instance)
+            else:
+                instance.pipeline_stage = None
+
+    def _create_stages_for_composite(self, start_index: int, count: int) -> None:
+        """Create additional stages needed for a composite component.
+
+        Args:
+            start_index: The first stage index the component occupies.
+            count: Number of stages the component needs.
+        """
+        # Find the last stage to calculate positions
+        sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
+        if not sorted_stages:
+            return
+
+        last_stage = sorted_stages[-1]
+        stage_spacing = self._grid.to_pixels(10)  # Default spacing
+
+        # Calculate spacing from existing stages
+        if len(sorted_stages) >= 2:
+            stage_spacing = sorted_stages[-1].x_position - sorted_stages[-2].x_position
+
+        # Create missing stages
+        current_stage_count = len(self._design.stages)
+        required_stages = start_index + count
+
+        for i in range(current_stage_count, required_stages):
+            new_x = last_stage.x_position + stage_spacing * (i - current_stage_count + 1)
+            new_stage = Stage(
+                index=i,
+                x_position=new_x,
+                width=self._register_width,
+                register_ids=[],  # Empty - no registers yet
+            )
+            self._design.stages.append(new_stage)
+            last_stage = new_stage
+
+        self._design.reindex_stages()
+        self._rebuild_all_stages()
+        self.stages_changed.emit()
+
+    def _create_stages_for_composite_at_position(
+        self, x: float, count: int, instance: ComponentInstance
+    ) -> None:
+        """Create stages for a composite component at a specific position.
+
+        Args:
+            x: X position where the component is placed.
+            count: Number of stages needed.
+            instance: The composite component instance.
+        """
+        stage_spacing = self._grid.to_pixels(10)  # Default spacing
+        snapped_x = self._grid.snap_to_grid(x)
+
+        # Create the required number of stages
+        for i in range(count):
+            stage_x = snapped_x + stage_spacing * i
+            new_stage = Stage(
+                index=i,
+                x_position=stage_x,
+                width=self._register_width,
+                register_ids=[],
+            )
+            self._design.stages.append(new_stage)
+
+        self._design.reindex_stages()
+        self._rebuild_all_stages()
+
+        # Assign the component to the first stage
+        instance.pipeline_stage = 0
+
+        # Align component position
+        item = self._component_items.get(instance.id)
+        if item:
+            item.setPos(snapped_x, instance.position[1])
+            instance.position = (snapped_x, instance.position[1])
+
+        self.stages_changed.emit()
 
     def _create_stage_item(self, stage: Stage) -> StageItem:
         """Create a graphics item for a stage."""
@@ -646,11 +774,21 @@ class DesignScene(QGraphicsScene):
     def _create_component_item(self, instance: ComponentInstance) -> ComponentItem:
         """Create a graphics item for a component instance."""
         definition = self._library.get(instance.definition_ref)
+
+        # Get composite design if this is a composite component
+        composite_design = None
+        if instance.is_composite and self._library_loader:
+            composite_design = self._library_loader.get_composite_design(
+                instance.definition_ref
+            )
+
         item = ComponentItem(
             instance,
             definition,
             grid=self._grid,
             snap_to_grid=self._snap_to_grid,
+            composite_design=composite_design,
+            library=self._library,
         )
         item.setPos(instance.position[0], instance.position[1])
         self.addItem(item)
