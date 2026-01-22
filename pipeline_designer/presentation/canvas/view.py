@@ -4,7 +4,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QGraphicsView
 
-from .items import ComponentItem, ConnectionItem
+from pipeline_designer.presentation.panels.component_palette import (
+    is_input_port_item,
+    is_output_port_item,
+    is_port_item,
+)
+
+from .items import ComponentItem, ConnectionItem, InterfacePortItem
 from .scene import DesignScene
 
 
@@ -139,15 +145,18 @@ class DesignView(QGraphicsView):
         if not selected_items:
             return
 
-        # Collect IDs to delete (components first, then connections)
+        # Collect IDs to delete (components first, then connections, then interface ports)
         component_ids = []
         connection_ids = []
+        interface_port_ids = []
 
         for item in selected_items:
             if isinstance(item, ComponentItem):
                 component_ids.append(item.get_instance().id)
             elif isinstance(item, ConnectionItem):
                 connection_ids.append(item.get_connection().id)
+            elif isinstance(item, InterfacePortItem):
+                interface_port_ids.append(item.get_port_id())
 
         # Delete components (this also removes their connections)
         for comp_id in component_ids:
@@ -156,6 +165,10 @@ class DesignView(QGraphicsView):
         # Delete remaining selected connections
         for conn_id in connection_ids:
             scene.remove_connection(conn_id)
+
+        # Delete interface ports
+        for port_id in interface_port_ids:
+            scene.remove_interface_port(port_id)
 
     def fit_to_content(self) -> None:
         """Fit the view to show all content."""
@@ -188,13 +201,19 @@ class DesignView(QGraphicsView):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        """Handle drop for component creation."""
+        """Handle drop for component or port creation."""
         if event.mimeData().hasText():
-            component_name = event.mimeData().text()
+            item_data = event.mimeData().text()
             scene_pos = self.mapToScene(event.position().toPoint())
             scene = self.scene()
             if isinstance(scene, DesignScene):
-                scene.add_component_at(component_name, scene_pos.x(), scene_pos.y())
+                if is_port_item(item_data):
+                    # Handle port drops - must be on the correct stage
+                    is_input = is_input_port_item(item_data)
+                    scene.add_interface_port_at(scene_pos.x(), scene_pos.y(), is_input)
+                else:
+                    # Handle regular component drops
+                    scene.add_component_at(item_data, scene_pos.x(), scene_pos.y())
             event.acceptProposedAction()
         else:
             super().dropEvent(event)

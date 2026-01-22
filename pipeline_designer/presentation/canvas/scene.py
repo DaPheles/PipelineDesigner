@@ -12,9 +12,12 @@ from pipeline_designer.domain.models import (
     ComponentInstance,
     Connection,
     Design,
+    InterfaceDirection,
+    InterfacePort,
     PortReference,
     Stage,
 )
+from pipeline_designer.infrastructure.persistence import LibraryLoader
 
 from .commands import (
     AddComponentCommand,
@@ -24,7 +27,15 @@ from .commands import (
     RemoveConnectionCommand,
     UndoStack,
 )
-from .items import ComponentItem, ConnectionItem, StageItem, TempConnectionItem
+from .items import (
+    ComponentBoundsItem,
+    ComponentItem,
+    ConnectionItem,
+    InterfacePortItem,
+    InterfaceStageItem,
+    StageItem,
+    TempConnectionItem,
+)
 from .items.port_item import PortItem
 
 
@@ -55,6 +66,7 @@ class DesignScene(QGraphicsScene):
         self._grid = grid or DEFAULT_GRID
         self._design = Design()
         self._library: dict[str, ComponentDefinition] = {}
+        self._library_loader: LibraryLoader | None = None
         self._component_items: dict[UUID, ComponentItem] = {}
         self._stage_items: dict[UUID, StageItem] = {}
         self._connection_items: dict[UUID, ConnectionItem] = {}
@@ -65,12 +77,21 @@ class DesignScene(QGraphicsScene):
         self._temp_connection: TempConnectionItem | None = None
         self._connection_source_port: PortItem | None = None
         self._connection_source_component_id: UUID | None = None
+        # Interface port connection state
+        self._connection_source_interface_port: InterfacePortItem | None = None
 
         # Undo/Redo stack
         self._undo_stack = UndoStack()
 
         # Track component movement for undo
         self._move_start_positions: dict[UUID, tuple[float, float]] = {}
+
+        # Interface stages and bounds
+        self._input_stage: InterfaceStageItem | None = None
+        self._output_stage: InterfaceStageItem | None = None
+        self._component_bounds: ComponentBoundsItem | None = None
+        self._interface_enabled = True  # Enable interface stages by default
+        self._interface_port_items: dict[UUID, InterfacePortItem] = {}
 
         self._setup_scene()
 
@@ -79,14 +100,320 @@ class DesignScene(QGraphicsScene):
         self.setSceneRect(QRectF(-5000, -5000, 10000, 10000))
         self.setBackgroundBrush(QBrush(QColor("#2b2b2b")))
 
+        # Create interface stages and bounds
+        if self._interface_enabled:
+            self._create_interface_items()
+
     @property
     def grid(self) -> GridConfig:
         """Get the grid configuration."""
         return self._grid
 
-    def set_library(self, library: dict[str, ComponentDefinition]) -> None:
-        """Set the component library."""
+    def _create_interface_items(self) -> None:
+        """Create the interface stages and component bounds."""
+        default_height = 400.0
+        default_input_x = -200.0
+        default_output_x = 400.0
+
+        # Create component bounds (background)
+        self._component_bounds = ComponentBoundsItem(self._grid)
+        self.addItem(self._component_bounds)
+
+        # Create input stage (left)
+        self._input_stage = InterfaceStageItem(
+            is_input=True,
+            x_position=default_input_x,
+            height=default_height,
+            grid=self._grid,
+        )
+        self._input_stage.on_position_changed = self._on_interface_stage_moved
+        self.addItem(self._input_stage)
+
+        # Create output stage (right)
+        self._output_stage = InterfaceStageItem(
+            is_input=False,
+            x_position=default_output_x,
+            height=default_height,
+            grid=self._grid,
+        )
+        self._output_stage.on_position_changed = self._on_interface_stage_moved
+        self.addItem(self._output_stage)
+
+        # Create interface ports from design
+        self._update_interface_ports()
+
+        # Initial bounds update
+        self._update_component_bounds()
+
+    def _on_interface_stage_moved(self, x: float) -> None:
+        """Handle interface stage movement."""
+        self._update_component_bounds()
+
+    def _update_interface_ports(self) -> None:
+        """Update interface ports from the design."""
+        if not self._input_stage or not self._output_stage:
+            return
+
+        # Clear existing port items from stages (but keep the tracking dict)
+        for port in self._input_stage.get_ports():
+            self.removeItem(port)
+        for port in self._output_stage.get_ports():
+            self.removeItem(port)
+
+        # Clear the tracking dictionary
+        self._interface_port_items.clear()
+
+        # Create ports from design interface_ports
+        for iface_port in self._design.get_input_interfaces():
+            port_item = self._create_interface_port_item(iface_port, is_input=True)
+            self._input_stage.add_port(port_item)
+
+        for iface_port in self._design.get_output_interfaces():
+            port_item = self._create_interface_port_item(iface_port, is_input=False)
+            self._output_stage.add_port(port_item)
+
+    def _create_interface_port_item(
+        self, iface_port: InterfacePort, is_input: bool
+    ) -> InterfacePortItem:
+        """Create an interface port item and wire up callbacks."""
+        port_item = InterfacePortItem(iface_port, grid=self._grid)
+        self._interface_port_items[iface_port.id] = port_item
+
+        # Wire up position change callback
+        port_item.on_position_changed = lambda y: self._on_interface_port_moved(
+            iface_port.id
+        )
+
+        # Wire up connection callback
+        # Input interface ports act as sources (they provide data to the design)
+        # Output interface ports act as targets (they receive data from the design)
+        if is_input:
+            port_item.on_connection_start = lambda: self._start_interface_connection(
+                port_item
+            )
+
+        return port_item
+
+    def _on_interface_port_moved(self, port_id: UUID) -> None:
+        """Handle interface port position change."""
+        port_item = self._interface_port_items.get(port_id)
+        if port_item:
+            port_item.update_model_position()
+
+    def add_interface_port_at(self, x: float, y: float, is_input: bool) -> bool:
+        """Add an interface port at the given position.
+
+        The port will only be created if dropped on the correct stage
+        (input ports on input stage, output ports on output stage).
+
+        Args:
+            x: X position in scene coordinates.
+            y: Y position in scene coordinates.
+            is_input: True to create an input port, False for output port.
+
+        Returns:
+            True if the port was created, False if dropped in wrong location.
+        """
+        if not self._input_stage or not self._output_stage:
+            return False
+
+        # Determine which stage the drop is on
+        target_stage = None
+        if is_input:
+            # Check if drop is on the input stage
+            input_rect = self._input_stage.sceneBoundingRect()
+            if input_rect.contains(x, y):
+                target_stage = self._input_stage
+        else:
+            # Check if drop is on the output stage
+            output_rect = self._output_stage.sceneBoundingRect()
+            if output_rect.contains(x, y):
+                target_stage = self._output_stage
+
+        if target_stage is None:
+            # Not dropped on the correct stage
+            return False
+
+        # Snap y position to grid
+        snapped_y = self._grid.snap_to_grid(y)
+
+        # Create a unique name for the port
+        existing_names = {p.name for p in self._design.interface_ports}
+        base_name = "in" if is_input else "out"
+        port_name = base_name
+        counter = 1
+        while port_name in existing_names:
+            port_name = f"{base_name}{counter}"
+            counter += 1
+
+        # Calculate position in grid units
+        grid_x = int(x / self._grid.size)
+        grid_y = int(snapped_y / self._grid.size)
+
+        # Create the interface port model
+        direction = InterfaceDirection.INPUT if is_input else InterfaceDirection.OUTPUT
+        iface_port = InterfacePort(
+            name=port_name,
+            direction=direction,
+            data_type="std_logic_vector",
+            position=(grid_x, grid_y),
+        )
+
+        # Add to design
+        self._design.interface_ports.append(iface_port)
+
+        # Create the graphics item
+        port_item = self._create_interface_port_item(iface_port, is_input)
+
+        # Position the port - centered horizontally on the stage
+        stage_x = target_stage.get_x_position()
+        if is_input:
+            # Input ports on right edge of input stage
+            port_x = stage_x + InterfaceStageItem.STAGE_WIDTH
+        else:
+            # Output ports on left edge of output stage
+            port_x = stage_x
+
+        # Set the position (relative to stage because it will be added as child)
+        if is_input:
+            rel_x = InterfaceStageItem.STAGE_WIDTH
+        else:
+            rel_x = 0
+
+        # Calculate relative y position within the stage
+        stage_y = target_stage.pos().y()
+        rel_y = snapped_y - stage_y
+
+        # Add to stage without auto-positioning (preserve manual position)
+        target_stage.add_port(port_item, auto_position=False)
+        port_item.setPos(rel_x, rel_y)
+
+        # Update bounds
+        self._update_component_bounds()
+
+        return True
+
+    def remove_interface_port(self, port_id: UUID) -> bool:
+        """Remove an interface port from the scene.
+
+        Args:
+            port_id: ID of the interface port to remove.
+
+        Returns:
+            True if the port was removed, False if not found.
+        """
+        port_item = self._interface_port_items.get(port_id)
+        if port_item is None:
+            return False
+
+        # Remove from scene
+        self.removeItem(port_item)
+        del self._interface_port_items[port_id]
+
+        # Remove from design
+        self._design.interface_ports = [
+            p for p in self._design.interface_ports if p.id != port_id
+        ]
+
+        return True
+
+    def get_interface_port_item(self, port_id: UUID) -> InterfacePortItem | None:
+        """Get an interface port item by ID."""
+        return self._interface_port_items.get(port_id)
+
+    def _update_component_bounds(self) -> None:
+        """Update the component bounds rectangle.
+
+        Only ComponentItems (primitives/components) affect the vertical extent,
+        not the register stage items which extend independently.
+        """
+        if not self._component_bounds or not self._input_stage or not self._output_stage:
+            return
+
+        # Collect only component rectangles (not stage items)
+        component_rects = []
+        for comp_item in self._component_items.values():
+            rect = comp_item.sceneBoundingRect()
+            component_rects.append(rect)
+
+        # Update bounds based on component positions only
+        input_x = self._input_stage.get_x_position()
+        output_x = self._output_stage.get_x_position()
+
+        top_y, bottom_y = self._component_bounds.update_from_components(
+            input_x,
+            output_x,
+            InterfaceStageItem.STAGE_WIDTH,
+            component_rects,
+        )
+
+        # Update interface stage heights to exactly match the bounds rectangle
+        height = bottom_y - top_y
+        self._input_stage.set_height(height, top_y)
+        self._output_stage.set_height(height, top_y)
+
+        # Also update pipeline stage items to match bounds height
+        for stage_item in self._stage_items.values():
+            stage_item.set_bounds(top_y, bottom_y)
+
+        # Update the design's visual extent
+        self._update_visual_extent(input_x, output_x, top_y, bottom_y)
+
+    def _update_visual_extent(
+        self, input_x: float, output_x: float, top_y: float, bottom_y: float
+    ) -> None:
+        """Update the design's visual extent from scene coordinates."""
+        # Convert to grid units
+        input_grid_x = int(input_x / self._grid.size)
+        output_grid_x = int((output_x + InterfaceStageItem.STAGE_WIDTH) / self._grid.size)
+        top_grid_y = int(top_y / self._grid.size)
+        bottom_grid_y = int(bottom_y / self._grid.size)
+
+        self._design.update_visual_extent(
+            input_grid_x, output_grid_x, top_grid_y, bottom_grid_y
+        )
+
+    def set_interface_enabled(self, enabled: bool) -> None:
+        """Enable or disable interface stages."""
+        if enabled == self._interface_enabled:
+            return
+
+        self._interface_enabled = enabled
+
+        if enabled:
+            self._create_interface_items()
+        else:
+            if self._input_stage:
+                self.removeItem(self._input_stage)
+                self._input_stage = None
+            if self._output_stage:
+                self.removeItem(self._output_stage)
+                self._output_stage = None
+            if self._component_bounds:
+                self.removeItem(self._component_bounds)
+                self._component_bounds = None
+
+    def get_input_stage(self) -> InterfaceStageItem | None:
+        """Get the input interface stage."""
+        return self._input_stage
+
+    def get_output_stage(self) -> InterfaceStageItem | None:
+        """Get the output interface stage."""
+        return self._output_stage
+
+    def set_library(
+        self,
+        library: dict[str, ComponentDefinition],
+        loader: LibraryLoader | None = None,
+    ) -> None:
+        """Set the component library.
+
+        Args:
+            library: Dictionary mapping component names to definitions.
+            loader: Optional library loader for composite component support.
+        """
         self._library = library
+        self._library_loader = loader
         # Cache the register width from the library
         register_def = library.get("Register")
         if register_def:
@@ -102,9 +429,17 @@ class DesignScene(QGraphicsScene):
         self._component_items.clear()
         self._stage_items.clear()
         self._connection_items.clear()
+        self._interface_port_items.clear()
         self._undo_stack.clear()
         self._move_start_positions.clear()
+        self._input_stage = None
+        self._output_stage = None
+        self._component_bounds = None
         self._design = design
+
+        # Create interface stages and bounds
+        if self._interface_enabled:
+            self._create_interface_items()
 
         # Create stage items first (they're behind components)
         for stage in design.stages:
@@ -118,15 +453,26 @@ class DesignScene(QGraphicsScene):
         for connection in design.connections:
             self._create_connection_item(connection)
 
+        # Update bounds after all items are created
+        self._update_component_bounds()
+
     def new_design(self) -> None:
         """Create a new empty design."""
         self.clear()
         self._component_items.clear()
         self._stage_items.clear()
         self._connection_items.clear()
+        self._interface_port_items.clear()
         self._undo_stack.clear()
         self._move_start_positions.clear()
+        self._input_stage = None
+        self._output_stage = None
+        self._component_bounds = None
         self._design = Design()
+
+        # Create interface stages and bounds
+        if self._interface_enabled:
+            self._create_interface_items()
 
     def add_component_at(self, component_name: str, x: float, y: float) -> ComponentItem | None:
         """Add a component instance at the specified position (with undo support).
@@ -178,9 +524,20 @@ class DesignScene(QGraphicsScene):
         if definition is None:
             return None
 
+        # Check if this is a composite component
+        is_composite = False
+        stage_count = 1
+        if self._library_loader and self._library_loader.is_composite(component_name):
+            is_composite = True
+            composite_design = self._library_loader.get_composite_design(component_name)
+            if composite_design:
+                stage_count = max(1, composite_design.latency)
+
         instance = ComponentInstance(
             definition_ref=component_name,
             position=(x, y),
+            is_composite=is_composite,
+            stage_count=stage_count,
         )
 
         self._design.add_component(instance)
@@ -189,8 +546,15 @@ class DesignScene(QGraphicsScene):
         # Handle stage assignment for registers
         if component_name == "Register":
             self._assign_register_to_stage(instance)
+        # Handle stage alignment for composite components
+        elif is_composite and stage_count > 1:
+            self._assign_composite_to_stages(instance)
 
         self.component_added.emit(instance)
+
+        # Update component bounds
+        self._update_component_bounds()
+
         return item
 
     def _get_register_x_position(self, x: float) -> float:
@@ -224,6 +588,31 @@ class DesignScene(QGraphicsScene):
         instance.pipeline_stage = stage.index
         self._update_register_displays()
         self.stages_changed.emit()
+
+    def _assign_composite_to_stages(self, instance: ComponentInstance) -> None:
+        """Assign a composite component to pipeline stages.
+
+        Composite components span multiple stages based on their latency.
+        This method aligns the component to existing stages or creates
+        new ones as needed.
+        """
+        x = instance.position[0]
+        stage_count = instance.stage_count
+
+        # Find the stage at the component's position
+        first_stage = self._design.get_stage_at_x(x)
+
+        if first_stage is not None:
+            # Align to existing stage
+            instance.pipeline_stage = first_stage.index
+
+            # Check if we need to ensure enough stages exist
+            # For now, composite components align to stages but don't create them
+            # Stages are created by registers
+        else:
+            # No stage at position - component is in a "stageless" area
+            # It will be aligned when registers create stages
+            instance.pipeline_stage = None
 
     def _create_stage_item(self, stage: Stage) -> StageItem:
         """Create a graphics item for a stage."""
@@ -293,6 +682,7 @@ class DesignScene(QGraphicsScene):
 
         self._connection_source_port = port_item
         self._connection_source_component_id = port_item.get_component_id()
+        self._connection_source_interface_port = None
 
         # Disable movement on all components during connection
         self._set_components_movable(False)
@@ -302,29 +692,88 @@ class DesignScene(QGraphicsScene):
         self._temp_connection = TempConnectionItem(start_pos)
         self.addItem(self._temp_connection)
 
+    def _start_interface_connection(self, interface_port_item: InterfacePortItem) -> None:
+        """Start creating a connection from an input interface port.
+
+        Input interface ports act as sources - they provide data INTO the design.
+        """
+        if not interface_port_item.is_input():
+            return
+
+        self._connection_source_interface_port = interface_port_item
+        self._connection_source_port = None
+        self._connection_source_component_id = None
+
+        # Disable movement on all components during connection
+        self._set_components_movable(False)
+
+        # Create temporary connection line
+        start_pos = interface_port_item.scenePos()
+        self._temp_connection = TempConnectionItem(start_pos)
+        self.addItem(self._temp_connection)
+
     def _is_valid_connection_target(self, target_port: PortItem) -> bool:
-        """Check if a port is a valid connection target."""
-        if self._connection_source_port is None:
+        """Check if a component port is a valid connection target."""
+        # Must have a source (either component port or interface port)
+        if self._connection_source_port is None and self._connection_source_interface_port is None:
             return False
 
         # Must be an input port
         if not target_port.is_input():
             return False
 
-        # Cannot connect to same component
-        source_comp_id = self._connection_source_component_id
         target_comp_id = target_port.get_component_id()
-        if source_comp_id == target_comp_id:
+
+        # If source is a component port
+        if self._connection_source_port is not None:
+            source_comp_id = self._connection_source_component_id
+            # Cannot connect to same component
+            if source_comp_id == target_comp_id:
+                return False
+
+            # Check if connection already exists
+            source_port_name = self._connection_source_port.get_port().name
+            target_port_name = target_port.get_port().name
+            for conn in self._design.connections:
+                if (conn.source.component_id == source_comp_id and
+                    conn.source.port_name == source_port_name and
+                    conn.target.component_id == target_comp_id and
+                    conn.target.port_name == target_port_name):
+                    return False
+
+        # If source is an interface port
+        elif self._connection_source_interface_port is not None:
+            source_iface_port = self._connection_source_interface_port.get_interface_port()
+            target_port_name = target_port.get_port().name
+
+            # Check if connection already exists
+            for conn in self._design.connections:
+                if (conn.source.interface_port_id == source_iface_port.id and
+                    conn.target.component_id == target_comp_id and
+                    conn.target.port_name == target_port_name):
+                    return False
+
+        return True
+
+    def _is_valid_interface_target(self, target_interface_port: InterfacePortItem) -> bool:
+        """Check if an output interface port is a valid connection target."""
+        # Must have a component port source
+        if self._connection_source_port is None:
             return False
 
-        # Check if connection already exists
+        # Target must be an output interface port (it receives data from the design)
+        if not target_interface_port.is_output():
+            return False
+
+        source_comp_id = self._connection_source_component_id
         source_port_name = self._connection_source_port.get_port().name
-        target_port_name = target_port.get_port().name
+        target_iface_port = target_interface_port.get_interface_port()
+
+        # Check if connection already exists
         for conn in self._design.connections:
             if (conn.source.component_id == source_comp_id and
                 conn.source.port_name == source_port_name and
-                conn.target.component_id == target_comp_id and
-                conn.target.port_name == target_port_name):
+                conn.target.interface_port_id == target_iface_port.id):
                 return False
 
         return True
@@ -335,7 +784,7 @@ class DesignScene(QGraphicsScene):
         source_comp_id: UUID,
         target_port: PortItem,
     ) -> None:
-        """Create a new connection between ports (with undo support)."""
+        """Create a new connection between component ports (with undo support)."""
         target_comp_id = target_port.get_component_id()
         if target_comp_id is None:
             return
@@ -354,16 +803,65 @@ class DesignScene(QGraphicsScene):
         command = AddConnectionCommand(scene=self, connection=connection)
         self._undo_stack.push(command)
 
+    def _create_interface_to_component_connection(
+        self,
+        source_interface_port: InterfacePortItem,
+        target_port: PortItem,
+    ) -> None:
+        """Create a connection from an interface port to a component port."""
+        target_comp_id = target_port.get_component_id()
+        if target_comp_id is None:
+            return
+
+        iface_port = source_interface_port.get_interface_port()
+        connection = Connection(
+            source=PortReference(
+                interface_port_id=iface_port.id,
+                port_name=iface_port.name,
+            ),
+            target=PortReference(
+                component_id=target_comp_id,
+                port_name=target_port.get_port().name,
+            ),
+        )
+
+        command = AddConnectionCommand(scene=self, connection=connection)
+        self._undo_stack.push(command)
+
+    def _create_component_to_interface_connection(
+        self,
+        source_port: PortItem,
+        source_comp_id: UUID,
+        target_interface_port: InterfacePortItem,
+    ) -> None:
+        """Create a connection from a component port to an interface port."""
+        iface_port = target_interface_port.get_interface_port()
+        connection = Connection(
+            source=PortReference(
+                component_id=source_comp_id,
+                port_name=source_port.get_port().name,
+            ),
+            target=PortReference(
+                interface_port_id=iface_port.id,
+                port_name=iface_port.name,
+            ),
+        )
+
+        command = AddConnectionCommand(scene=self, connection=connection)
+        self._undo_stack.push(command)
+
     def _create_connection_item(self, connection: Connection) -> ConnectionItem | None:
         """Create a graphics item for a connection."""
-        # Get source and target positions
+        # Get source and target positions (handle both component and interface ports)
         source_pos = self._get_port_position(
             connection.source.component_id,
             connection.source.port_name,
+            connection.source.interface_port_id,
         )
         target_pos = self._get_port_position(
             connection.target.component_id,
             connection.target.port_name,
+            connection.target.interface_port_id,
         )
 
         if source_pos is None or target_pos is None:
@@ -378,12 +876,24 @@ class DesignScene(QGraphicsScene):
         self._connection_items[connection.id] = item
         return item
 
-    def _get_port_position(self, component_id: UUID, port_name: str) -> tuple[float, float] | None:
-        """Get the scene position of a port."""
-        comp_item = self._component_items.get(component_id)
-        if comp_item is None:
+    def _get_port_position(self, component_id: UUID | None, port_name: str, interface_port_id: UUID | None = None) -> tuple[float, float] | None:
+        """Get the scene position of a port (component or interface)."""
+        # If it's an interface port
+        if interface_port_id is not None:
+            iface_item = self._interface_port_items.get(interface_port_id)
+            if iface_item is not None:
+                pos = iface_item.scenePos()
+                return (pos.x(), pos.y())
             return None
-        return comp_item.get_port_scene_pos(port_name)
+
+        # If it's a component port
+        if component_id is not None:
+            comp_item = self._component_items.get(component_id)
+            if comp_item is None:
+                return None
+            return comp_item.get_port_scene_pos(port_name)
+
+        return None
 
     def _cancel_connection(self) -> None:
         """Cancel the current connection creation."""
@@ -392,14 +902,19 @@ class DesignScene(QGraphicsScene):
             self._temp_connection = None
         self._connection_source_port = None
         self._connection_source_component_id = None
+        self._connection_source_interface_port = None
 
         # Re-enable movement on all components
         self._set_components_movable(True)
 
-        # Reset any highlighted ports
+        # Reset any highlighted ports (component ports)
         for comp_item in self._component_items.values():
             for port_item in comp_item._port_items.values():
                 port_item.set_connection_target(False)
+
+        # Reset any highlighted interface ports
+        for iface_port_item in self._interface_port_items.values():
+            iface_port_item.set_highlighted(False)
 
     def _set_components_movable(self, movable: bool) -> None:
         """Enable or disable movement on all component items."""
@@ -447,16 +962,21 @@ class DesignScene(QGraphicsScene):
             source_pos = self._get_port_position(
                 conn.source.component_id,
                 conn.source.port_name,
+                conn.source.interface_port_id,
             )
             target_pos = self._get_port_position(
                 conn.target.component_id,
                 conn.target.port_name,
+                conn.target.interface_port_id,
             )
             if source_pos and target_pos:
                 conn_item.update_positions(
                     QPointF(source_pos[0], source_pos[1]),
                     QPointF(target_pos[0], target_pos[1]),
                 )
+
+        # Update component bounds when components move
+        self._update_component_bounds()
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle mouse move for connection dragging."""
@@ -466,25 +986,42 @@ class DesignScene(QGraphicsScene):
         if self._temp_connection:
             self._temp_connection.set_end_pos(event.scenePos())
 
-            # Check if we're over a valid target port
+            # Check if we're over a valid target
             items = self.items(event.scenePos())
             target_port = None
+            target_interface_port = None
+
             for item in items:
                 if isinstance(item, PortItem) and item.is_input():
                     target_port = item
                     break
+                elif isinstance(item, InterfacePortItem) and item.is_output():
+                    # Output interface ports can be targets (from component output ports)
+                    target_interface_port = item
+                    break
 
-            # Update port highlighting
+            # Reset all highlighting first
             for comp_item in self._component_items.values():
                 for port_item in comp_item._port_items.values():
-                    if port_item == target_port:
-                        is_valid = self._is_valid_connection_target(port_item)
-                        port_item.set_connection_target(True, is_valid)
-                        self._temp_connection.set_target_state(True, is_valid)
-                    else:
-                        port_item.set_connection_target(False)
+                    port_item.set_connection_target(False)
+            for iface_port_item in self._interface_port_items.values():
+                iface_port_item.set_highlighted(False)
 
-            if target_port is None:
+            # Highlight valid target
+            found_valid_target = False
+            if target_port is not None:
+                is_valid = self._is_valid_connection_target(target_port)
+                target_port.set_connection_target(True, is_valid)
+                self._temp_connection.set_target_state(True, is_valid)
+                found_valid_target = True
+            elif target_interface_port is not None and self._connection_source_port is not None:
+                # Connecting from component output to output interface port
+                is_valid = self._is_valid_interface_target(target_interface_port)
+                target_interface_port.set_highlighted(is_valid)
+                self._temp_connection.set_target_state(True, is_valid)
+                found_valid_target = True
+
+            if not found_valid_target:
                 self._temp_connection.set_target_state(False)
 
         # Update connection positions when components are being moved
@@ -492,19 +1029,48 @@ class DesignScene(QGraphicsScene):
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle mouse release for connection creation."""
-        if self._temp_connection and self._connection_source_port:
-            # Check if we released over a valid input port
+        if self._temp_connection:
             items = self.items(event.scenePos())
-            for item in items:
-                if isinstance(item, PortItem) and item.is_input():
-                    if self._is_valid_connection_target(item):
-                        self._create_connection(
-                            self._connection_source_port,
-                            self._connection_source_component_id,
-                            item,
-                        )
-                        self._cancel_connection()
-                        return
+
+            # Case 1: Source is a component output port
+            if self._connection_source_port is not None:
+                for item in items:
+                    # Target is a component input port
+                    if isinstance(item, PortItem) and item.is_input():
+                        if self._is_valid_connection_target(item):
+                            self._create_connection(
+                                self._connection_source_port,
+                                self._connection_source_component_id,
+                                item,
+                            )
+                            self._cancel_connection()
+                            super().mouseReleaseEvent(event)
+                            return
+                    # Target is an output interface port
+                    elif isinstance(item, InterfacePortItem) and item.is_output():
+                        if self._is_valid_interface_target(item):
+                            self._create_component_to_interface_connection(
+                                self._connection_source_port,
+                                self._connection_source_component_id,
+                                item,
+                            )
+                            self._cancel_connection()
+                            super().mouseReleaseEvent(event)
+                            return
+
+            # Case 2: Source is an input interface port
+            elif self._connection_source_interface_port is not None:
+                for item in items:
+                    # Target is a component input port
+                    if isinstance(item, PortItem) and item.is_input():
+                        if self._is_valid_connection_target(item):
+                            self._create_interface_to_component_connection(
+                                self._connection_source_interface_port,
+                                item,
+                            )
+                            self._cancel_connection()
+                            super().mouseReleaseEvent(event)
+                            return
 
             # No valid target - cancel connection
             self._cancel_connection()
@@ -587,6 +1153,10 @@ class DesignScene(QGraphicsScene):
             self.stages_changed.emit()
 
         self.component_removed.emit(component_id)
+
+        # Update component bounds
+        self._update_component_bounds()
+
         return True
 
     def _restore_component_internal(self, instance: ComponentInstance) -> ComponentItem | None:
@@ -602,6 +1172,10 @@ class DesignScene(QGraphicsScene):
             self._assign_register_to_stage(instance)
 
         self.component_added.emit(instance)
+
+        # Update component bounds
+        self._update_component_bounds()
+
         return item
 
     def _move_component_internal(self, component_id: UUID, pos: tuple[float, float]) -> bool:

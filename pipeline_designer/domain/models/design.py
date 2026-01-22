@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .instance import ComponentInstance, Connection
+from .instance import ComponentInstance, Connection, InterfaceDirection, InterfacePort
 from .stage import Stage
 
 
@@ -18,11 +18,43 @@ class DesignMetadata(BaseModel):
     version: str = Field(default="1.0.0")
 
 
+class VisualExtent(BaseModel):
+    """Visual extent of the design (component bounds).
+
+    Represents the bounding rectangle of the design in grid units.
+    When used as a component, this defines the visual size.
+    """
+
+    width: int = Field(default=20, description="Width in grid units")
+    height: int = Field(default=10, description="Height in grid units")
+    input_stage_x: int = Field(default=-10, description="Input stage X position in grid units")
+    output_stage_x: int = Field(default=10, description="Output stage X position in grid units")
+
+
+class ComponentConfig(BaseModel):
+    """Configuration for using a design as a reusable component.
+
+    When a design has this configuration, it can be loaded as a component
+    and placed in other designs like a primitive.
+    """
+
+    enabled: bool = Field(default=False, description="Whether this design is a component")
+    category: str = Field(default="components", description="Component category")
+    description: str = Field(default="", description="Component description")
+    color: str = Field(default="#9b59b6", description="Component color (hex)")
+    width: int = Field(default=8, description="Visual width in grid units")
+    height: int = Field(default=6, description="Visual height in grid units")
+
+
 class Design(BaseModel):
     """A complete pipeline design document.
 
     Includes pipeline stages that are defined by register placements.
     Stages represent vertical boundaries for each clock cycle.
+
+    When component_config.enabled is True, this design can be used as a
+    reusable component in other designs. The interface_ports define the
+    external connections, and the latency equals the number of stages.
     """
 
     name: str = Field(default="Untitled", description="Design name")
@@ -35,9 +67,36 @@ class Design(BaseModel):
     stages: list[Stage] = Field(
         default_factory=list, description="Pipeline stages defined by registers"
     )
+    interface_ports: list[InterfacePort] = Field(
+        default_factory=list, description="External interface ports for component mode"
+    )
+    component_config: ComponentConfig = Field(
+        default_factory=ComponentConfig, description="Component configuration"
+    )
+    visual: VisualExtent = Field(
+        default_factory=VisualExtent, description="Visual extent of the design bounds"
+    )
     metadata: DesignMetadata = Field(
         default_factory=DesignMetadata, description="Design metadata"
     )
+
+    @property
+    def latency(self) -> int:
+        """Get the latency (number of pipeline stages)."""
+        return len(self.stages)
+
+    @property
+    def is_component(self) -> bool:
+        """Check if this design is configured as a component."""
+        return self.component_config.enabled
+
+    def get_input_interfaces(self) -> list[InterfacePort]:
+        """Get all input interface ports."""
+        return [p for p in self.interface_ports if p.direction == InterfaceDirection.INPUT]
+
+    def get_output_interfaces(self) -> list[InterfacePort]:
+        """Get all output interface ports."""
+        return [p for p in self.interface_ports if p.direction == InterfaceDirection.OUTPUT]
 
     def get_component_by_id(self, component_id: UUID) -> ComponentInstance | None:
         """Get a component instance by ID."""
@@ -121,3 +180,68 @@ class Design(BaseModel):
         if removed:
             self.reindex_stages()
         return removed
+
+    def add_interface_port(self, port: InterfacePort) -> None:
+        """Add an interface port to the design."""
+        self.interface_ports.append(port)
+        self.metadata.modified_at = datetime.now()
+
+    def remove_interface_port(self, port_id: UUID) -> bool:
+        """Remove an interface port from the design."""
+        for port in self.interface_ports:
+            if port.id == port_id:
+                self.interface_ports.remove(port)
+                self.metadata.modified_at = datetime.now()
+                return True
+        return False
+
+    def get_interface_port_by_id(self, port_id: UUID) -> InterfacePort | None:
+        """Get an interface port by ID."""
+        for port in self.interface_ports:
+            if port.id == port_id:
+                return port
+        return None
+
+    def update_visual_extent(
+        self,
+        input_stage_x: int,
+        output_stage_x: int,
+        top_y: int,
+        bottom_y: int,
+    ) -> None:
+        """Update the visual extent from scene bounds.
+
+        Args:
+            input_stage_x: Input stage X position in grid units.
+            output_stage_x: Output stage X position in grid units.
+            top_y: Top boundary in grid units.
+            bottom_y: Bottom boundary in grid units.
+        """
+        self.visual.input_stage_x = input_stage_x
+        self.visual.output_stage_x = output_stage_x
+        self.visual.width = output_stage_x - input_stage_x
+        self.visual.height = bottom_y - top_y
+        self.metadata.modified_at = datetime.now()
+
+    def get_ports_as_primitive_format(self) -> list[dict]:
+        """Export interface ports in primitive-compatible JSON format.
+
+        Returns a list of port dictionaries with:
+        - name: port name
+        - direction: "in" or "out" (primitive format)
+        - data_type: data type string
+        - position: [x, y] in grid units
+        """
+        ports = []
+        for iface_port in self.interface_ports:
+            # Convert direction to primitive format ("in"/"out" instead of "input"/"output")
+            direction = "in" if iface_port.direction == InterfaceDirection.INPUT else "out"
+            port_dict = {
+                "name": iface_port.name,
+                "direction": direction,
+                "data_type": iface_port.data_type,
+            }
+            if iface_port.position:
+                port_dict["position"] = list(iface_port.position)
+            ports.append(port_dict)
+        return ports

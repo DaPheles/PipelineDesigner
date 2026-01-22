@@ -92,6 +92,20 @@ class StageItem(QGraphicsRectItem):
         self._view_height = height
         self._update_geometry()
 
+    def set_bounds(self, top_y: float, bottom_y: float) -> None:
+        """Set the vertical bounds of the stage to match component bounds.
+
+        Args:
+            top_y: Top boundary (already includes padding).
+            bottom_y: Bottom boundary (already includes padding).
+        """
+        height = bottom_y - top_y
+        self._view_height = height
+        # Set rect starting at 0 with the given height
+        self.setRect(0, 0, self._stage.width, height)
+        # Position at the stage's x position and the top_y
+        self.setPos(self._stage.x_position, top_y)
+
     def paint(
         self,
         painter: QPainter,

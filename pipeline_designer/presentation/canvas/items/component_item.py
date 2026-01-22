@@ -58,6 +58,7 @@ class ComponentItem(QGraphicsRectItem):
         self._snap_to_grid = snap_to_grid
         self._port_items: dict[str, PortItem] = {}
         self._is_register = instance.definition_ref == "Register"
+        self._is_composite = instance.is_composite
         self._last_x: float = instance.position[0]
 
         # Callback for register movement: (instance, old_x) -> None
@@ -175,6 +176,10 @@ class ComponentItem(QGraphicsRectItem):
         """Check if this component is a register."""
         return self._is_register
 
+    def is_composite(self) -> bool:
+        """Check if this component is a composite."""
+        return self._is_composite
+
     def get_port_item(self, port_name: str) -> PortItem | None:
         """Get a port item by name."""
         return self._port_items.get(port_name)
@@ -242,6 +247,17 @@ class ComponentItem(QGraphicsRectItem):
         painter.setBrush(brush)
         painter.drawRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
+        # For composite components, draw stage divider lines
+        if self._is_composite and self._instance.stage_count > 1:
+            stage_width = rect.width() / self._instance.stage_count
+            painter.setPen(QPen(self._base_color.darker(150), 1, Qt.PenStyle.DashLine))
+            for i in range(1, self._instance.stage_count):
+                x = rect.x() + stage_width * i
+                painter.drawLine(
+                    int(x), int(rect.y() + self.HEADER_HEIGHT),
+                    int(x), int(rect.y() + rect.height())
+                )
+
         header_rect = QRectF(rect.x(), rect.y(), rect.width(), self.HEADER_HEIGHT)
         painter.setBrush(QBrush(self._base_color.darker(120)))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -260,6 +276,16 @@ class ComponentItem(QGraphicsRectItem):
             header_rect.height() - self.CORNER_RADIUS,
         )
 
+        # Draw composite indicator icon (small layered squares)
+        if self._is_composite:
+            icon_size = 10
+            icon_x = rect.x() + 4
+            icon_y = rect.y() + (self.HEADER_HEIGHT - icon_size) / 2
+            painter.setPen(QPen(QColor("#ffffff"), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(int(icon_x), int(icon_y), icon_size - 2, icon_size - 2)
+            painter.drawRect(int(icon_x + 2), int(icon_y + 2), icon_size - 2, icon_size - 2)
+
         painter.setPen(QPen(QColor("#ffffff")))
         font = QFont("Arial", 10, QFont.Weight.Bold)
         painter.setFont(font)
@@ -271,8 +297,17 @@ class ComponentItem(QGraphicsRectItem):
         # For registers, show stage number
         if self._is_register and self._instance.pipeline_stage is not None:
             name = f"{name} [S{self._instance.pipeline_stage}]"
+        # For composite components, show latency
+        elif self._is_composite and self._instance.stage_count > 1:
+            name = f"{name} (L={self._instance.stage_count})"
 
-        painter.drawText(header_rect, Qt.AlignmentFlag.AlignCenter, name)
+        # Adjust text position for composite (account for icon)
+        if self._is_composite:
+            text_rect = QRectF(header_rect.x() + 16, header_rect.y(),
+                              header_rect.width() - 16, header_rect.height())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, name)
+        else:
+            painter.drawText(header_rect, Qt.AlignmentFlag.AlignCenter, name)
 
     def boundingRect(self) -> QRectF:
         """Return the bounding rectangle including selection padding."""

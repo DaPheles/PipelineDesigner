@@ -141,9 +141,24 @@ class PropertyEditor(QWidget):
         type_label.setStyleSheet("color: #888;")
         self._content_layout.addRow("Type:", type_label)
 
+        # Composite component info
+        if instance.is_composite:
+            composite_label = QLabel("Yes")
+            composite_label.setStyleSheet("color: #9b59b6; font-weight: bold;")
+            self._content_layout.addRow("Composite:", composite_label)
+
+            latency_label = QLabel(f"{instance.stage_count} stage(s)")
+            latency_label.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Latency:", latency_label)
+
         # Pipeline stage (read-only, if set)
         if instance.pipeline_stage is not None:
-            stage_label = QLabel(f"Stage {instance.pipeline_stage}")
+            if instance.is_composite and instance.stage_count > 1:
+                end_stage = instance.get_end_stage()
+                stage_text = f"Stage {instance.pipeline_stage} - {end_stage}"
+            else:
+                stage_text = f"Stage {instance.pipeline_stage}"
+            stage_label = QLabel(stage_text)
             stage_label.setStyleSheet("color: #888;")
             self._content_layout.addRow("Pipeline Stage:", stage_label)
 
