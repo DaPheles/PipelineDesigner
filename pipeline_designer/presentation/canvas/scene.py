@@ -631,116 +631,205 @@ class DesignScene(QGraphicsScene):
     def _assign_composite_to_stages(self, instance: ComponentInstance) -> None:
         """Assign a composite component to pipeline stages.
 
-        Composite components span multiple stages based on their latency.
-        This method aligns the component to existing stages or creates
-        new ones as needed.
+        Synchronizes the composite's internal register stages with the main
+        design's stages. The component is positioned so that its internal
+        stages align with existing or newly created main design stages.
         """
-        x = instance.position[0]
-        stage_count = instance.stage_count
-
-        # Find the stage at or nearest to the component's position
-        first_stage = self._design.get_stage_at_x(x)
-
-        if first_stage is not None:
-            # Align component position to the stage
-            instance.pipeline_stage = first_stage.index
-
-            # Snap component x position to stage
-            item = self._component_items.get(instance.id)
-            if item:
-                item.setPos(first_stage.x_position, instance.position[1])
-                instance.position = (first_stage.x_position, instance.position[1])
-
-            # Check if we need more stages for this component's latency
-            required_stages = first_stage.index + stage_count
-            current_stage_count = len(self._design.stages)
-
-            if required_stages > current_stage_count:
-                # Create additional stages
-                self._create_stages_for_composite(first_stage.index, stage_count)
-        else:
-            # No stage exists yet - create stages based on latency
-            if stage_count > 0:
-                # Create stages for the composite component
-                self._create_stages_for_composite_at_position(x, stage_count, instance)
-            else:
-                instance.pipeline_stage = None
-
-    def _create_stages_for_composite(self, start_index: int, count: int) -> None:
-        """Create additional stages needed for a composite component.
-
-        Args:
-            start_index: The first stage index the component occupies.
-            count: Number of stages the component needs.
-        """
-        # Find the last stage to calculate positions
-        sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
-        if not sorted_stages:
+        if not self._library_loader:
             return
 
-        last_stage = sorted_stages[-1]
-        stage_spacing = self._grid.to_pixels(10)  # Default spacing
+        composite_design = self._library_loader.get_composite_design(
+            instance.definition_ref
+        )
+        if not composite_design:
+            return
 
-        # Calculate spacing from existing stages
-        if len(sorted_stages) >= 2:
-            stage_spacing = sorted_stages[-1].x_position - sorted_stages[-2].x_position
+        # Get internal stage offsets (relative to component origin)
+        internal_stage_offsets = self._get_composite_internal_stage_offsets(composite_design)
+        if not internal_stage_offsets:
+            # No internal stages - nothing to synchronize
+            return
 
-        # Create missing stages
-        current_stage_count = len(self._design.stages)
-        required_stages = start_index + count
+        drop_x = instance.position[0]
+        drop_y = instance.position[1]
 
-        for i in range(current_stage_count, required_stages):
-            new_x = last_stage.x_position + stage_spacing * (i - current_stage_count + 1)
-            new_stage = Stage(
-                index=i,
-                x_position=new_x,
-                width=self._register_width,
-                register_ids=[],  # Empty - no registers yet
+        # Calculate where the first internal stage would be at current position
+        first_internal_offset = internal_stage_offsets[0]
+        first_internal_stage_x = drop_x + first_internal_offset
+
+        # Find the nearest main design stage to align with
+        nearest_stage = self._find_nearest_stage(first_internal_stage_x)
+
+        if nearest_stage is not None:
+            # Align the composite so its first internal stage matches the main stage
+            component_x = nearest_stage.x_position - first_internal_offset
+            component_x = self._grid.snap_to_grid(component_x)
+
+            instance.pipeline_stage = nearest_stage.index
+
+            # Update position
+            item = self._component_items.get(instance.id)
+            if item:
+                item.setPos(component_x, drop_y)
+                instance.position = (component_x, drop_y)
+
+            # Create additional stages if needed for remaining internal stages
+            self._ensure_stages_for_composite(
+                composite_design, instance, component_x, nearest_stage.index
             )
-            self._design.stages.append(new_stage)
-            last_stage = new_stage
+        else:
+            # No stages exist - create stages based on internal stage positions
+            self._create_stages_from_composite(composite_design, instance, drop_x)
 
-        self._design.reindex_stages()
         self._rebuild_all_stages()
         self.stages_changed.emit()
 
-    def _create_stages_for_composite_at_position(
-        self, x: float, count: int, instance: ComponentInstance
-    ) -> None:
-        """Create stages for a composite component at a specific position.
+    def _get_composite_internal_stage_offsets(self, composite_design: Design) -> list[float]:
+        """Get the x offsets of internal register stages from component origin.
 
         Args:
-            x: X position where the component is placed.
-            count: Number of stages needed.
-            instance: The composite component instance.
-        """
-        stage_spacing = self._grid.to_pixels(10)  # Default spacing
-        snapped_x = self._grid.snap_to_grid(x)
+            composite_design: The composite component's internal design.
 
-        # Create the required number of stages
-        for i in range(count):
-            stage_x = snapped_x + stage_spacing * i
+        Returns:
+            List of x offsets (in pixels) from the component's left edge to each
+            internal stage, sorted by position.
+        """
+        if not composite_design.stages:
+            return []
+
+        # Get the origin offset (input_stage_x in pixels)
+        origin_x = self._grid.to_pixels(composite_design.visual.input_stage_x)
+
+        # Calculate offset from component origin to each internal stage
+        offsets = []
+        for stage in sorted(composite_design.stages, key=lambda s: s.x_position):
+            # Internal stage x_position is in design pixel coordinates
+            # Component origin is at input_stage_x in those coordinates
+            offset = stage.x_position - origin_x
+            offsets.append(offset)
+
+        return offsets
+
+    def _find_nearest_stage(self, x: float) -> Stage | None:
+        """Find the nearest stage to a given x position.
+
+        Args:
+            x: X position in pixels.
+
+        Returns:
+            The nearest Stage, or None if no stages exist.
+        """
+        if not self._design.stages:
+            return None
+
+        nearest = None
+        min_distance = float('inf')
+
+        for stage in self._design.stages:
+            distance = abs(stage.x_position - x)
+            if distance < min_distance:
+                min_distance = distance
+                nearest = stage
+
+        # Only return if within a reasonable snapping distance
+        snap_threshold = self._grid.to_pixels(5)  # 5 grid units
+        if min_distance <= snap_threshold:
+            return nearest
+
+        return None
+
+    def _ensure_stages_for_composite(
+        self,
+        composite_design: Design,
+        instance: ComponentInstance,
+        component_x: float,
+        first_stage_index: int,
+    ) -> None:
+        """Ensure main design has stages for all internal composite stages.
+
+        Args:
+            composite_design: The composite component's internal design.
+            instance: The composite component instance.
+            component_x: The component's x position.
+            first_stage_index: Index of the first aligned stage.
+        """
+        internal_offsets = self._get_composite_internal_stage_offsets(composite_design)
+        if len(internal_offsets) <= 1:
+            return
+
+        # For each additional internal stage, ensure a main design stage exists
+        for i, offset in enumerate(internal_offsets[1:], start=1):
+            target_x = component_x + offset
+            target_stage_index = first_stage_index + i
+
+            # Check if a stage exists at this index
+            existing_stage = None
+            for stage in self._design.stages:
+                if stage.index == target_stage_index:
+                    existing_stage = stage
+                    break
+
+            if existing_stage is None:
+                # Get width from internal stage if available
+                internal_stage = composite_design.stages[i] if i < len(composite_design.stages) else None
+                stage_width = internal_stage.width if internal_stage else self._register_width
+
+                # Create new stage
+                new_stage = Stage(
+                    index=target_stage_index,
+                    x_position=self._grid.snap_to_grid(target_x),
+                    width=stage_width,
+                    register_ids=[],
+                )
+                self._design.stages.append(new_stage)
+
+        self._design.reindex_stages()
+
+    def _create_stages_from_composite(
+        self,
+        composite_design: Design,
+        instance: ComponentInstance,
+        drop_x: float,
+    ) -> None:
+        """Create main design stages based on composite's internal stages.
+
+        Args:
+            composite_design: The composite component's internal design.
+            instance: The composite component instance.
+            drop_x: Where the component was dropped.
+        """
+        internal_offsets = self._get_composite_internal_stage_offsets(composite_design)
+        if not internal_offsets:
+            return
+
+        # Snap the component position
+        component_x = self._grid.snap_to_grid(drop_x)
+
+        # Update component position
+        item = self._component_items.get(instance.id)
+        if item:
+            item.setPos(component_x, instance.position[1])
+            instance.position = (component_x, instance.position[1])
+
+        # Create stages for each internal stage
+        for i, offset in enumerate(internal_offsets):
+            stage_x = component_x + offset
+            stage_x = self._grid.snap_to_grid(stage_x)
+
+            # Get width from internal stage
+            internal_stage = composite_design.stages[i] if i < len(composite_design.stages) else None
+            stage_width = internal_stage.width if internal_stage else self._register_width
+
             new_stage = Stage(
                 index=i,
                 x_position=stage_x,
-                width=self._register_width,
+                width=stage_width,
                 register_ids=[],
             )
             self._design.stages.append(new_stage)
 
         self._design.reindex_stages()
-        self._rebuild_all_stages()
-
-        # Assign the component to the first stage
         instance.pipeline_stage = 0
-
-        # Align component position
-        item = self._component_items.get(instance.id)
-        if item:
-            item.setPos(snapped_x, instance.position[1])
-            instance.position = (snapped_x, instance.position[1])
-
-        self.stages_changed.emit()
 
     def _create_stage_item(self, stage: Stage) -> StageItem:
         """Create a graphics item for a stage."""
