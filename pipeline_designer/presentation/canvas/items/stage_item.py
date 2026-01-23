@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 from pipeline_designer.domain.models import Stage
 
 
@@ -26,26 +27,29 @@ class StageItem(QGraphicsRectItem):
         "#556b7a",  # Stage 4 - Steel blue
         "#4d6066",  # Stage 5 - Dark gray
     ]
-    LABEL_HEIGHT = 24.0
+    LABEL_HEIGHT = 25.0
     STAGE_ALPHA = 40  # Transparency (0-255)
 
     def __init__(
         self,
         stage: Stage,
         view_height: float = 10000.0,
+        grid: GridConfig | None = None,
         parent: QGraphicsItem | None = None,
     ):
         """Initialize the stage item.
 
         Args:
-            stage: The stage model.
+            stage: The stage model (positions in grid units).
             view_height: Height of the stage band (should span view).
+            grid: Grid configuration for unit conversion.
             parent: Parent graphics item.
         """
         super().__init__(parent)
 
         self._stage = stage
         self._view_height = view_height
+        self._grid = grid or DEFAULT_GRID
 
         self._setup_item()
 
@@ -61,8 +65,12 @@ class StageItem(QGraphicsRectItem):
     def _update_geometry(self) -> None:
         """Update the stage rectangle geometry."""
         half_height = self._view_height / 2
-        self.setRect(0, -half_height, self._stage.width, self._view_height)
-        self.setPos(self._stage.x_position, 0)
+        # Convert width from grid units to pixels
+        width_px = self._grid.to_pixels(self._stage.width)
+        self.setRect(0, -half_height, width_px, self._view_height)
+        # Convert x_position from grid units to pixels
+        x_px = self._grid.to_pixels(self._stage.x_position)
+        self.setPos(x_px, 0)
 
     def _update_appearance(self) -> None:
         """Update the visual appearance."""
@@ -96,15 +104,18 @@ class StageItem(QGraphicsRectItem):
         """Set the vertical bounds of the stage to match component bounds.
 
         Args:
-            top_y: Top boundary (already includes padding).
-            bottom_y: Bottom boundary (already includes padding).
+            top_y: Top boundary in pixels (already includes padding).
+            bottom_y: Bottom boundary in pixels (already includes padding).
         """
         height = bottom_y - top_y
         self._view_height = height
+        # Convert width from grid units to pixels
+        width_px = self._grid.to_pixels(self._stage.width)
         # Set rect starting at 0 with the given height
-        self.setRect(0, 0, self._stage.width, height)
-        # Position at the stage's x position and the top_y
-        self.setPos(self._stage.x_position, top_y)
+        self.setRect(0, 0, width_px, height)
+        # Convert x_position from grid units to pixels and position at top_y
+        x_px = self._grid.to_pixels(self._stage.x_position)
+        self.setPos(x_px, top_y)
 
     def paint(
         self,

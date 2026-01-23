@@ -11,12 +11,14 @@ class Stage(BaseModel):
     Stages are vertical boundaries in the pipeline design, each representing
     one clock cycle of latency. Registers placed within a stage are considered
     to be at the same pipeline depth.
+
+    All position and dimension values are stored in grid units.
     """
 
     id: UUID = Field(default_factory=uuid4, description="Unique stage identifier")
     index: int = Field(..., description="Stage index (1-based, left to right)")
-    x_position: float = Field(..., description="X position in pixels")
-    width: float = Field(..., description="Width in pixels (matches register width)")
+    x_position: float = Field(..., description="X position in grid units")
+    width: float = Field(..., description="Width in grid units (matches register width)")
     register_ids: list[UUID] = Field(
         default_factory=list,
         description="IDs of registers belonging to this stage",

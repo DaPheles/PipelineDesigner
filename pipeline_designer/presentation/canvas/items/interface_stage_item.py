@@ -56,7 +56,7 @@ class InterfaceStageItem(QGraphicsRectItem):
         self._user_dragging = False
 
         self._setup_item()
-        self.setPos(x_position, 0)
+        self.setPos(x_position - self.STAGE_WIDTH / 2, 0)
 
     def _setup_item(self) -> None:
         """Configure item settings."""

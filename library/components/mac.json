@@ -5,7 +5,7 @@
       "id": "06482f09-a1a2-4f9f-97c2-de001066cb9c",
       "definition_ref": "Mult",
       "position": [
-        -280.0,
+        -14.0,
         0.0
       ],
       "generic_values": {},
@@ -19,8 +19,8 @@
       "id": "efedbd47-1d6d-4328-b55e-64b764d50d03",
       "definition_ref": "Register",
       "position": [
-        -420.0,
-        -120.0
+        -21.0,
+        -6.0
       ],
       "generic_values": {},
       "pipeline_stage": 1,
@@ -33,8 +33,8 @@
       "id": "45aca534-4edf-4cf2-9834-323827ed9496",
       "definition_ref": "Register",
       "position": [
-        -420.0,
-        80.0
+        -21.0,
+        4.0
       ],
       "generic_values": {},
       "pipeline_stage": 1,
@@ -47,8 +47,8 @@
       "id": "d3c5daa4-8345-4b53-afd6-21f9061c19af",
       "definition_ref": "Register",
       "position": [
-        -120.0,
-        -20.0
+        -6.0,
+        -1.0
       ],
       "generic_values": {},
       "pipeline_stage": 2,
@@ -61,8 +61,8 @@
       "id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
       "definition_ref": "Adder",
       "position": [
-        20.0,
-        100.0
+        1.0,
+        5.0
       ],
       "generic_values": {},
       "pipeline_stage": null,
@@ -213,8 +213,8 @@
     {
       "id": "3e0dfcdc-55f7-42d5-9337-c1298110934b",
       "index": 1,
-      "x_position": -420.0,
-      "width": 80.0,
+      "x_position": -21.0,
+      "width": 4.0,
       "register_ids": [
         "efedbd47-1d6d-4328-b55e-64b764d50d03",
         "45aca534-4edf-4cf2-9834-323827ed9496"
@@ -223,8 +223,8 @@
     {
       "id": "140f7c5b-236c-491e-879a-850f53208094",
       "index": 2,
-      "x_position": -120.0,
-      "width": 80.0,
+      "x_position": -6.0,
+      "width": 4.0,
       "register_ids": [
         "d3c5daa4-8345-4b53-afd6-21f9061c19af"
       ]
@@ -273,7 +273,7 @@
       "direction": "output",
       "data_type": "std_logic_vector",
       "position": [
-        10,
+        20,
         -2
       ],
       "internal_component_id": null,
@@ -285,7 +285,7 @@
       "direction": "output",
       "data_type": "std_logic_vector",
       "position": [
-        10,
+        20,
         7
       ],
       "internal_component_id": null,
@@ -301,14 +301,14 @@
     "height": 6
   },
   "visual": {
-    "width": 37,
+    "width": 47,
     "height": 28,
     "input_stage_x": -25,
-    "output_stage_x": 12
+    "output_stage_x": 22
   },
   "metadata": {
     "created_at": "2026-01-23T09:12:14.774745",
-    "modified_at": "2026-01-23T09:15:49.611960",
+    "modified_at": "2026-01-23T14:53:18.502186",
     "author": "",
     "version": "1.0.0"
   }

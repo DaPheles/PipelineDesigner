@@ -272,7 +272,7 @@ class CompositeViewItem(QGraphicsRectItem):
             return
 
         # Get the origin offset from the design's visual config
-        # input_stage_x is the left edge of the component bounds in design coordinates
+        # input_stage_x is the left edge of the component bounds in design grid coordinates
         origin_x = self._grid.to_pixels(self._design.visual.input_stage_x)
         origin_y = 0  # Assume y origin at 0
 
@@ -280,11 +280,12 @@ class CompositeViewItem(QGraphicsRectItem):
         # Account for header height in parent component
         header_height = 24.0
 
-        # Find vertical bounds of content
+        # Find vertical bounds of content (positions are in grid units, convert to pixels)
         min_y = float('inf')
         max_y = float('-inf')
         for comp in self._design.components:
-            y = comp.position[1]
+            # Convert position from grid units to pixels
+            y = self._grid.to_pixels(comp.position[1])
             definition = self._library.get(comp.definition_ref)
             if definition:
                 _, h = definition.visual.get_pixel_size(self._grid)
@@ -298,23 +299,23 @@ class CompositeViewItem(QGraphicsRectItem):
         y_offset = header_height + (available_height - content_height) / 2 - min_y
 
         # Create internal stage items first (background)
-        # Apply stretch factor to x positions and widths
+        # Stage positions are in grid units, convert to pixels
         for stage in self._design.stages:
-            # Position relative to origin, with stretch applied
-            stage_x = stage.x_position - origin_x
-            stage_width = stage.width
+            # Convert stage position from grid units to pixels, then offset by origin
+            stage_x_px = self._grid.to_pixels(stage.x_position) - origin_x
+            stage_width_px = self._grid.to_pixels(stage.width)
             stage_height = content_height if content_height > 0 else self._bounds.height() - header_height
 
-            # Create a stretched copy of the stage for visualization
+            # Create a stretched copy of the stage for visualization (in pixels)
             stretched_stage = Stage(
                 id=stage.id,
                 index=stage.index,
-                x_position=stage_x,  # Already transformed
-                width=stage_width,
+                x_position=stage_x_px,  # Already transformed to pixels
+                width=stage_width_px,
                 register_ids=stage.register_ids,
             )
             item = InternalStageItem(stretched_stage, stage_height, parent=self)
-            item.setPos(stage_x, y_offset + min_y)
+            item.setPos(stage_x_px, y_offset + min_y)
             self._internal_items.append(item)
 
         # Create internal component items
@@ -323,9 +324,9 @@ class CompositeViewItem(QGraphicsRectItem):
 
             item = InternalComponentItem(comp, definition, self._grid, parent=self)
 
-            # Position using original coordinates, offset by origin, with stretch applied to x
-            x = comp.position[0] - origin_x
-            y = comp.position[1] + y_offset
+            # Convert position from grid units to pixels, offset by origin
+            x = self._grid.to_pixels(comp.position[0]) - origin_x
+            y = self._grid.to_pixels(comp.position[1]) + y_offset
             item.setPos(x, y)
 
             self._internal_items.append(item)

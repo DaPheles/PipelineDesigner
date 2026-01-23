@@ -116,7 +116,7 @@ class DesignScene(QGraphicsScene):
         """Create the interface stages and component bounds."""
         default_height = 400.0
         default_input_x = -200.0
-        default_output_x = 400.0
+        default_output_x = 200.0
 
         # Create component bounds (background)
         self._component_bounds = ComponentBoundsItem(self._grid)
@@ -583,9 +583,11 @@ class DesignScene(QGraphicsScene):
             comp_width, _ = definition.visual.get_pixel_size(self._grid)
             x = self._avoid_stage_overlap(x, comp_width)
 
+        # Convert pixel position to grid units for storage
+        pos_grid = self._grid.pos_to_grid((x, y))
         instance = ComponentInstance(
             definition_ref=component_name,
-            position=(x, y),
+            position=pos_grid,
             is_composite=is_composite,
             stage_count=stage_count,
         )
@@ -614,24 +616,37 @@ class DesignScene(QGraphicsScene):
         return item
 
     def _get_register_x_position(self, x: float) -> float:
-        """Get the x position for a register, snapping to existing stages."""
-        stage = self._design.get_stage_at_x(x)
+        """Get the x position for a register, snapping to existing stages.
+
+        Args:
+            x: X position in pixels.
+
+        Returns:
+            Snapped x position in pixels.
+        """
+        # Convert to grid units to check stage
+        x_grid = self._grid.to_grid_units(x)
+        stage = self._design.get_stage_at_x(x_grid)
         if stage:
-            return stage.x_position
+            # Return stage position in pixels
+            return self._grid.to_pixels(stage.x_position)
         if self._snap_to_grid:
             return self._grid.snap_to_grid(x)
         return x
 
     def _assign_register_to_stage(self, instance: ComponentInstance) -> None:
         """Assign a register instance to a stage, creating one if needed."""
-        x = instance.position[0]
-        stage = self._design.get_stage_at_x(x)
+        # Position is in grid units
+        x_grid = instance.position[0]
+        stage = self._design.get_stage_at_x(x_grid)
 
         if stage is None:
+            # Width in grid units
+            width_grid = self._grid.to_grid_units(self._register_width)
             stage = Stage(
                 index=0,
-                x_position=x,
-                width=self._register_width,
+                x_position=x_grid,
+                width=width_grid,
                 register_ids=[instance.id],
             )
             self._design.stages.append(stage)
@@ -662,44 +677,47 @@ class DesignScene(QGraphicsScene):
         if not composite_design:
             return
 
-        # Get internal stage offsets (relative to component origin)
+        # Get internal stage offsets (relative to component origin, in pixels)
         internal_stage_offsets = self._get_composite_internal_stage_offsets(composite_design)
         if not internal_stage_offsets:
             # No internal stages - nothing to synchronize
             return
 
-        drop_x = instance.position[0]
-        drop_y = instance.position[1]
+        # Instance position is in grid units, convert to pixels for scene operations
+        drop_x_px = self._grid.to_pixels(instance.position[0])
+        drop_y_px = self._grid.to_pixels(instance.position[1])
 
-        # Calculate where the first internal stage would be at current position
+        # Calculate where the first internal stage would be at current position (in pixels)
         first_internal_offset = internal_stage_offsets[0]
-        first_internal_stage_x = drop_x + first_internal_offset
+        first_internal_stage_x = drop_x_px + first_internal_offset
 
         # Find the nearest main design stage to align with
         nearest_stage = self._find_nearest_stage(first_internal_stage_x)
 
         if nearest_stage is not None:
             # Align the composite so its first internal stage matches the main stage
-            component_x = nearest_stage.x_position - first_internal_offset
-            component_x = self._grid.snap_to_grid(component_x)
+            # Stage x_position is in grid units, convert to pixels
+            stage_x_px = self._grid.to_pixels(nearest_stage.x_position)
+            component_x_px = stage_x_px - first_internal_offset
+            component_x_px = self._grid.snap_to_grid(component_x_px)
 
             instance.pipeline_stage = nearest_stage.index
 
             # Handle spacing differences for multi-stage composites
             if len(internal_stage_offsets) > 1:
                 self._synchronize_stage_spacing(
-                    composite_design, instance, component_x,
+                    composite_design, instance, component_x_px,
                     nearest_stage.index, internal_stage_offsets
                 )
 
-            # Update position
+            # Update position - convert back to grid units for storage
             item = self._component_items.get(instance.id)
             if item:
-                item.setPos(component_x, drop_y)
-                instance.position = (component_x, drop_y)
+                item.setPos(component_x_px, drop_y_px)
+                instance.position = self._grid.pos_to_grid((component_x_px, drop_y_px))
         else:
             # No stages exist - create stages based on internal stage positions
-            self._create_stages_from_composite(composite_design, instance, drop_x)
+            self._create_stages_from_composite(composite_design, instance, drop_x_px)
 
         self._rebuild_all_stages()
         self.stages_changed.emit()
@@ -717,15 +735,16 @@ class DesignScene(QGraphicsScene):
         if not composite_design.stages:
             return []
 
-        # Get the origin offset (input_stage_x in pixels)
+        # Get the origin offset (input_stage_x in grid units, convert to pixels)
         origin_x = self._grid.to_pixels(composite_design.visual.input_stage_x)
 
         # Calculate offset from component origin to each internal stage
         offsets = []
         for stage in sorted(composite_design.stages, key=lambda s: s.x_position):
-            # Internal stage x_position is in design pixel coordinates
+            # Internal stage x_position is in grid units, convert to pixels
+            stage_x_px = self._grid.to_pixels(stage.x_position)
             # Component origin is at input_stage_x in those coordinates
-            offset = stage.x_position - origin_x
+            offset = stage_x_px - origin_x
             offsets.append(offset)
 
         return offsets
@@ -746,7 +765,9 @@ class DesignScene(QGraphicsScene):
         min_distance = float('inf')
 
         for stage in self._design.stages:
-            distance = abs(stage.x_position - x)
+            # Convert stage position from grid units to pixels for comparison
+            stage_x_px = self._grid.to_pixels(stage.x_position)
+            distance = abs(stage_x_px - x)
             if distance < min_distance:
                 min_distance = distance
                 nearest = stage
@@ -776,25 +797,26 @@ class DesignScene(QGraphicsScene):
         Args:
             composite_design: The composite component's internal design.
             instance: The composite component instance.
-            component_x: The component's x position.
+            component_x: The component's x position in pixels.
             first_stage_index: Index of the first aligned stage.
-            internal_offsets: List of internal stage x offsets from component origin.
+            internal_offsets: List of internal stage x offsets from component origin (in pixels).
         """
         if len(internal_offsets) < 2:
             return
 
-        # Calculate internal stage spacing (distance between consecutive internal stages)
+        # Calculate internal stage spacing (distance between consecutive internal stages, in pixels)
         internal_spacings = []
         for i in range(1, len(internal_offsets)):
             spacing = internal_offsets[i] - internal_offsets[i - 1]
             internal_spacings.append(spacing)
 
         # Get main design stage spacing at the insertion point
+        # Stage positions are in grid units, convert to pixels
         sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
         main_spacings = []
         for i in range(1, len(sorted_stages)):
-            spacing = sorted_stages[i].x_position - sorted_stages[i - 1].x_position
-            main_spacings.append(spacing)
+            spacing_px = self._grid.to_pixels(sorted_stages[i].x_position - sorted_stages[i - 1].x_position)
+            main_spacings.append(spacing_px)
 
         if not main_spacings:
             # Only one stage exists, use default spacing
@@ -820,7 +842,7 @@ class DesignScene(QGraphicsScene):
         """Shift all stages and components to the right of a position.
 
         Args:
-            from_x: X position from which to start shifting.
+            from_x: X position from which to start shifting (in pixels).
             from_stage_index: Stage index from which to start shifting.
             shift_amount: Amount to shift in pixels.
         """
@@ -828,15 +850,20 @@ class DesignScene(QGraphicsScene):
         if shift_amount <= 0:
             return
 
+        # Convert shift amount to grid units
+        shift_grid = self._grid.to_grid_units(shift_amount)
+
         # Shift stages at or after from_stage_index (except the first aligned one)
+        # Stage positions are in grid units
         for stage in self._design.stages:
             if stage.index > from_stage_index:
-                stage.x_position += shift_amount
+                stage.x_position += shift_grid
 
         # Shift components to the right of from_x
         for comp_id, item in self._component_items.items():
             comp_instance = item.get_instance()
-            comp_x = comp_instance.position[0]
+            # Position is in grid units, convert to pixels for comparison
+            comp_x_px = self._grid.to_pixels(comp_instance.position[0])
 
             # Get component width to check if it's fully to the right
             definition = self._library.get(comp_instance.definition_ref)
@@ -846,11 +873,12 @@ class DesignScene(QGraphicsScene):
                 comp_width = self._grid.to_pixels(4)
 
             # Shift if component starts after from_x (with some tolerance)
-            if comp_x > from_x + comp_width / 2:
-                new_x = comp_x + shift_amount
-                new_y = comp_instance.position[1]
-                comp_instance.position = (new_x, new_y)
-                item.setPos(new_x, new_y)
+            if comp_x_px > from_x + comp_width / 2:
+                new_x_px = comp_x_px + shift_amount
+                new_y_px = self._grid.to_pixels(comp_instance.position[1])
+                # Convert back to grid units for storage
+                comp_instance.position = self._grid.pos_to_grid((new_x_px, new_y_px))
+                item.setPos(new_x_px, new_y_px)
 
         # Update connections
         self.update_connection_positions()
@@ -885,7 +913,7 @@ class DesignScene(QGraphicsScene):
         Args:
             composite_design: The composite component's internal design.
             instance: The composite component instance.
-            component_x: The component's x position.
+            component_x: The component's x position in pixels.
             first_stage_index: Index of the first aligned stage.
         """
         internal_offsets = self._get_composite_internal_stage_offsets(composite_design)
@@ -894,7 +922,7 @@ class DesignScene(QGraphicsScene):
 
         # For each additional internal stage, ensure a main design stage exists
         for i, offset in enumerate(internal_offsets[1:], start=1):
-            target_x = component_x + offset
+            target_x_px = component_x + offset
             target_stage_index = first_stage_index + i
 
             # Check if a stage exists at this index
@@ -905,15 +933,16 @@ class DesignScene(QGraphicsScene):
                     break
 
             if existing_stage is None:
-                # Get width from internal stage if available
+                # Get width from internal stage if available (already in grid units)
                 internal_stage = composite_design.stages[i] if i < len(composite_design.stages) else None
-                stage_width = internal_stage.width if internal_stage else self._register_width
+                stage_width_grid = internal_stage.width if internal_stage else self._grid.to_grid_units(self._register_width)
 
-                # Create new stage
+                # Create new stage - convert x position to grid units
+                target_x_grid = self._grid.to_grid_units(self._grid.snap_to_grid(target_x_px))
                 new_stage = Stage(
                     index=target_stage_index,
-                    x_position=self._grid.snap_to_grid(target_x),
-                    width=stage_width,
+                    x_position=target_x_grid,
+                    width=stage_width_grid,
                     register_ids=[],
                 )
                 self._design.stages.append(new_stage)
@@ -931,34 +960,37 @@ class DesignScene(QGraphicsScene):
         Args:
             composite_design: The composite component's internal design.
             instance: The composite component instance.
-            drop_x: Where the component was dropped.
+            drop_x: Where the component was dropped (in pixels).
         """
         internal_offsets = self._get_composite_internal_stage_offsets(composite_design)
         if not internal_offsets:
             return
 
-        # Snap the component position
-        component_x = self._grid.snap_to_grid(drop_x)
+        # Snap the component position (in pixels)
+        component_x_px = self._grid.snap_to_grid(drop_x)
+        component_y_px = self._grid.to_pixels(instance.position[1])
 
-        # Update component position
+        # Update component position - convert to grid units for storage
         item = self._component_items.get(instance.id)
         if item:
-            item.setPos(component_x, instance.position[1])
-            instance.position = (component_x, instance.position[1])
+            item.setPos(component_x_px, component_y_px)
+            instance.position = self._grid.pos_to_grid((component_x_px, component_y_px))
 
         # Create stages for each internal stage
         for i, offset in enumerate(internal_offsets):
-            stage_x = component_x + offset
-            stage_x = self._grid.snap_to_grid(stage_x)
+            stage_x_px = component_x_px + offset
+            stage_x_px = self._grid.snap_to_grid(stage_x_px)
+            # Convert to grid units for storage
+            stage_x_grid = self._grid.to_grid_units(stage_x_px)
 
-            # Get width from internal stage
+            # Get width from internal stage (already in grid units)
             internal_stage = composite_design.stages[i] if i < len(composite_design.stages) else None
-            stage_width = internal_stage.width if internal_stage else self._register_width
+            stage_width_grid = internal_stage.width if internal_stage else self._grid.to_grid_units(self._register_width)
 
             new_stage = Stage(
                 index=i,
-                x_position=stage_x,
-                width=stage_width,
+                x_position=stage_x_grid,
+                width=stage_width_grid,
                 register_ids=[],
             )
             self._design.stages.append(new_stage)
@@ -968,7 +1000,7 @@ class DesignScene(QGraphicsScene):
 
     def _create_stage_item(self, stage: Stage) -> StageItem:
         """Create a graphics item for a stage."""
-        item = StageItem(stage, view_height=10000.0)
+        item = StageItem(stage, view_height=10000.0, grid=self._grid)
         self.addItem(item)
         self._stage_items[stage.id] = item
         return item
@@ -995,7 +1027,7 @@ class DesignScene(QGraphicsScene):
             if item.is_register():
                 item.update()
 
-    def _calculate_alignment_index(self, x: float) -> int:
+    def _calculate_alignment_index(self, x_grid: float) -> int:
         """Calculate the alignment index for a component at position x.
 
         Alignment indices:
@@ -1006,7 +1038,7 @@ class DesignScene(QGraphicsScene):
         - N: Right of stage N (where N is the last stage index)
 
         Args:
-            x: X position of the component.
+            x_grid: X position of the component in grid units.
 
         Returns:
             The alignment index (0 to number of stages).
@@ -1016,9 +1048,9 @@ class DesignScene(QGraphicsScene):
 
         sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
 
-        # Check each stage boundary
+        # Check each stage boundary (positions are in grid units)
         for i, stage in enumerate(sorted_stages):
-            if x < stage.x_position:
+            if x_grid < stage.x_position:
                 return i
 
         # Component is to the right of all stages
@@ -1062,7 +1094,9 @@ class DesignScene(QGraphicsScene):
             composite_design=composite_design,
             library=self._library,
         )
-        item.setPos(instance.position[0], instance.position[1])
+        # Convert position from grid units to pixels
+        pos_px = self._grid.pos_to_pixels(instance.position)
+        item.setPos(pos_px[0], pos_px[1])
         self.addItem(item)
         self._component_items[instance.id] = item
 
@@ -1493,24 +1527,32 @@ class DesignScene(QGraphicsScene):
         super().mouseReleaseEvent(event)
 
     def _on_register_moved(self, instance: ComponentInstance, old_x: float) -> None:
-        """Handle a register being moved."""
-        new_x = instance.position[0]
+        """Handle a register being moved.
+
+        Args:
+            instance: The register instance that was moved.
+            old_x: Previous x position in grid units.
+        """
+        # Position is now in grid units
+        new_x_grid = instance.position[0]
 
         for stage in self._design.stages:
             if instance.id in stage.register_ids:
                 stage.register_ids.remove(instance.id)
                 break
 
-        existing_stage = self._design.get_stage_at_x(new_x)
+        existing_stage = self._design.get_stage_at_x(new_x_grid)
 
         if existing_stage is not None:
             if instance.id not in existing_stage.register_ids:
                 existing_stage.register_ids.append(instance.id)
         else:
+            # Width in grid units
+            width_grid = self._grid.to_grid_units(self._register_width)
             new_stage = Stage(
                 index=0,
-                x_position=new_x,
-                width=self._register_width,
+                x_position=new_x_grid,
+                width=width_grid,
                 register_ids=[instance.id],
             )
             self._design.stages.append(new_stage)
@@ -1595,7 +1637,15 @@ class DesignScene(QGraphicsScene):
         return item
 
     def _move_component_internal(self, component_id: UUID, pos: tuple[float, float]) -> bool:
-        """Internal method to move a component (used by undo/redo)."""
+        """Internal method to move a component (used by undo/redo).
+
+        Args:
+            component_id: ID of the component to move.
+            pos: New position in grid units.
+
+        Returns:
+            True if the component was moved, False otherwise.
+        """
         item = self._component_items.get(component_id)
         if item is None:
             return False
@@ -1604,9 +1654,11 @@ class DesignScene(QGraphicsScene):
         old_x = instance.position[0]
         is_register = instance.definition_ref == "Register"
 
-        # Update position
+        # Update position (stored in grid units)
         instance.position = pos
-        item.setPos(pos[0], pos[1])
+        # Convert to pixels for Qt scene
+        pos_px = self._grid.pos_to_pixels(pos)
+        item.setPos(pos_px[0], pos_px[1])
 
         # Handle stage updates for registers
         if is_register:
@@ -1639,12 +1691,12 @@ class DesignScene(QGraphicsScene):
         Maintains a minimum distance of 2 grid units from any stage.
 
         Args:
-            x: Proposed x position of the component.
-            width: Width of the component.
+            x: Proposed x position of the component in pixels.
+            width: Width of the component in pixels.
             _depth: Recursion depth (internal use).
 
         Returns:
-            Adjusted x position that avoids stage overlap.
+            Adjusted x position in pixels that avoids stage overlap.
         """
         if not self._design.stages or _depth > 10:
             return x
@@ -1658,8 +1710,9 @@ class DesignScene(QGraphicsScene):
 
         # Check each stage for potential overlap
         for stage in sorted_stages:
-            stage_left = stage.x_position
-            stage_right = stage.x_position + stage.width
+            # Convert stage position from grid units to pixels
+            stage_left = self._grid.to_pixels(stage.x_position)
+            stage_right = self._grid.to_pixels(stage.x_position + stage.width)
 
             # Check if component overlaps with stage (including gap)
             if comp_left < stage_right + min_gap and comp_right > stage_left - min_gap:
@@ -1684,10 +1737,18 @@ class DesignScene(QGraphicsScene):
         return x
 
     def snap_register_x(self, x: float) -> float:
-        """Snap x coordinate for a register (stage-aware)."""
-        stage = self._design.get_stage_at_x(x)
+        """Snap x coordinate for a register (stage-aware).
+
+        Args:
+            x: X position in pixels.
+
+        Returns:
+            Snapped x position in pixels.
+        """
+        x_grid = self._grid.to_grid_units(x)
+        stage = self._design.get_stage_at_x(x_grid)
         if stage:
-            return stage.x_position
+            return self._grid.to_pixels(stage.x_position)
         if self._snap_to_grid:
             return self._grid.snap_to_grid(x)
         return x
@@ -1699,16 +1760,20 @@ class DesignScene(QGraphicsScene):
         Excludes the register's aligned stage from conflict checking.
 
         Args:
-            register_x: Current x position of the register being moved.
+            register_x: Current x position of the register being moved (in pixels).
             aligned_stage_index: Index of the stage this register is aligned to (excluded from check).
         """
         min_gap = self._grid.to_pixels(2)  # 2 grid units minimum distance
 
+        # Convert register_x to grid units for stage lookup
+        register_x_grid = self._grid.to_grid_units(register_x)
+
         # Get the stage at the register's position (or where it will create one)
-        stage_at_x = self._design.get_stage_at_x(register_x)
+        stage_at_x = self._design.get_stage_at_x(register_x_grid)
         if stage_at_x:
-            stage_left = stage_at_x.x_position
-            stage_right = stage_at_x.x_position + stage_at_x.width
+            # Convert stage positions to pixels for comparison
+            stage_left = self._grid.to_pixels(stage_at_x.x_position)
+            stage_right = self._grid.to_pixels(stage_at_x.x_position + stage_at_x.width)
         else:
             # Register will create a new stage here
             stage_left = register_x
@@ -1728,7 +1793,8 @@ class DesignScene(QGraphicsScene):
             else:
                 comp_width = self._grid.to_pixels(4)
 
-            comp_left = instance.position[0]
+            # Convert component position from grid units to pixels
+            comp_left = self._grid.to_pixels(instance.position[0])
             comp_right = comp_left + comp_width
 
             # Check if component is too close to the stage

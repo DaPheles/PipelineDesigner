@@ -4,10 +4,7 @@
     {
       "id": "a0ac0001-0001-0001-0001-000000000001",
       "definition_ref": "Adder",
-      "position": [
-        -80.0,
-        -80.0
-      ],
+      "position": [-4, -4],
       "generic_values": {
         "WIDTH": 16
       },
@@ -19,10 +16,7 @@
     {
       "id": "a0ac0002-0002-0002-0002-000000000002",
       "definition_ref": "Register",
-      "position": [
-        60.0,
-        -120.0
-      ],
+      "position": [3, -6],
       "generic_values": {
         "WIDTH": 16
       },
@@ -34,10 +28,7 @@
     {
       "id": "a0ac0003-0003-0003-0003-000000000003",
       "definition_ref": "Adder",
-      "position": [
-        200.0,
-        60.0
-      ],
+      "position": [10, 3],
       "generic_values": {
         "WIDTH": 16
       },
@@ -49,10 +40,7 @@
     {
       "id": "a0ac0004-0004-0004-0004-000000000004",
       "definition_ref": "Register",
-      "position": [
-        360.0,
-        20.0
-      ],
+      "position": [18, 1],
       "generic_values": {
         "WIDTH": 16
       },
@@ -173,8 +161,8 @@
     {
       "id": "66eafdcd-d23f-4a6d-bdc2-633dff9f9f53",
       "index": 1,
-      "x_position": 60.0,
-      "width": 80.0,
+      "x_position": 3,
+      "width": 4,
       "register_ids": [
         "a0ac0002-0002-0002-0002-000000000002"
       ]
@@ -182,8 +170,8 @@
     {
       "id": "500a0002-0002-0002-0002-000000000002",
       "index": 2,
-      "x_position": 360.0,
-      "width": 80.0,
+      "x_position": 18,
+      "width": 4,
       "register_ids": [
         "a0ac0004-0004-0004-0004-000000000004"
       ]
@@ -213,10 +201,7 @@
       "name": "acc_in",
       "direction": "input",
       "data_type": "std_logic_vector",
-      "position": [
-        -10,
-        0
-      ],
+      "position": [-10, 0],
       "internal_component_id": "a0ac0003-0003-0003-0003-000000000003",
       "internal_port_name": "b"
     },
@@ -225,10 +210,7 @@
       "name": "clk",
       "direction": "input",
       "data_type": "std_logic",
-      "position": [
-        -10,
-        5
-      ],
+      "position": [-10, 5],
       "internal_component_id": null,
       "internal_port_name": null
     },
@@ -237,10 +219,7 @@
       "name": "rst",
       "direction": "input",
       "data_type": "std_logic",
-      "position": [
-        -10,
-        9
-      ],
+      "position": [-10, 9],
       "internal_component_id": null,
       "internal_port_name": null
     },
@@ -249,10 +228,7 @@
       "name": "result",
       "direction": "output",
       "data_type": "std_logic_vector",
-      "position": [
-        24,
-        0
-      ],
+      "position": [24, 0],
       "internal_component_id": "a0ac0004-0004-0004-0004-000000000004",
       "internal_port_name": "q"
     }
@@ -273,7 +249,7 @@
   },
   "metadata": {
     "created_at": "2024-01-01T00:00:00",
-    "modified_at": "2026-01-22T21:15:02.041582",
+    "modified_at": "2026-01-23T10:00:00",
     "author": "Pipeline Designer",
     "version": "1.0.0"
   }

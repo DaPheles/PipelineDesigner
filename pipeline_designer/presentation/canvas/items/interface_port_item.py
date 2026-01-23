@@ -27,6 +27,7 @@ class InterfacePortItem(QGraphicsEllipseItem):
     # Larger radius for interface ports
     PORT_RADIUS = 12.0
     LABEL_OFFSET = 20.0
+    POS_OFFSET = 20.0
 
     def __init__(
         self,

@@ -64,6 +64,7 @@ class ComponentItem(QGraphicsRectItem):
         self._port_items: dict[str, PortItem] = {}
         self._is_register = instance.definition_ref == "Register"
         self._is_composite = instance.is_composite
+        # Store last_x in grid units (same as instance.position)
         self._last_x: float = instance.position[0]
         self._composite_design = composite_design
         self._library = library or {}
@@ -250,22 +251,28 @@ class ComponentItem(QGraphicsRectItem):
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             pos = value
-            new_x = pos.x()
-            old_x = self._last_x
+            # pos is in pixels (scene coordinates)
+            new_x_px = pos.x()
+            new_y_px = pos.y()
 
-            # Update instance position
-            self._instance.position = (new_x, pos.y())
+            # Convert to grid units for storage
+            new_x_grid = self._grid.to_grid_units(new_x_px)
+            new_y_grid = self._grid.to_grid_units(new_y_px)
+            old_x_grid = self._last_x
+
+            # Update instance position in grid units
+            self._instance.position = (new_x_grid, new_y_grid)
 
             # For registers, check distance conflicts and notify if x position changed
             if self._is_register:
-                # Check for distance conflicts with other components
+                # Check for distance conflicts with other components (uses pixels)
                 if self.check_distance_conflicts:
-                    self.check_distance_conflicts(new_x, self._instance.pipeline_stage)
+                    self.check_distance_conflicts(new_x_px, self._instance.pipeline_stage)
 
-                if new_x != old_x:
-                    self._last_x = new_x
+                if new_x_grid != old_x_grid:
+                    self._last_x = new_x_grid
                     if self.register_moved:
-                        self.register_moved(self._instance, old_x)
+                        self.register_moved(self._instance, old_x_grid)
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_appearance()

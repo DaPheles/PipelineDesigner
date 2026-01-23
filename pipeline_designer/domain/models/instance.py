@@ -66,7 +66,7 @@ class ComponentInstance(BaseModel):
     id: UUID = Field(default_factory=uuid4, description="Unique instance ID")
     definition_ref: str = Field(..., description="Reference to component definition name")
     position: tuple[float, float] = Field(
-        default=(0.0, 0.0), description="Position (x, y) on the canvas"
+        default=(0.0, 0.0), description="Position (x, y) in grid units"
     )
     generic_values: dict[str, Any] = Field(
         default_factory=dict, description="Values for generic parameters"
