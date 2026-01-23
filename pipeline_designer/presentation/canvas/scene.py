@@ -697,10 +697,6 @@ class DesignScene(QGraphicsScene):
             if item:
                 item.setPos(component_x, drop_y)
                 instance.position = (component_x, drop_y)
-                # Apply stretch if needed
-                if instance.stretch_factor != 1.0:
-                    self._apply_component_stretch(item, instance, composite_design)
-
         else:
             # No stages exist - create stages based on internal stage positions
             self._create_stages_from_composite(composite_design, instance, drop_x)
@@ -814,10 +810,6 @@ class DesignScene(QGraphicsScene):
             # Composite needs more space - shift stages and elements
             extra_space = first_internal_spacing - main_spacing
             self._shift_elements_right(component_x, first_stage_index, extra_space)
-        elif main_spacing > first_internal_spacing + self._grid.size:
-            # Main design has more space - stretch composite
-            stretch_factor = main_spacing / first_internal_spacing if first_internal_spacing > 0 else 1.0
-            instance.stretch_factor = stretch_factor
 
     def _shift_elements_right(
         self,
@@ -863,60 +855,17 @@ class DesignScene(QGraphicsScene):
         # Update connections
         self.update_connection_positions()
 
-    def _apply_component_stretch(
-        self,
-        item: "ComponentItem",
-        instance: ComponentInstance,
-        composite_design: Design,
-    ) -> None:
-        """Apply stretch factor to a composite component.
-
-        Updates the component's visual width and recreates its internal view.
-
-        Args:
-            item: The component graphics item.
-            instance: The component instance.
-            composite_design: The composite's internal design.
-        """
-        if instance.stretch_factor == 1.0:
-            return
-
-        definition = self._library.get(instance.definition_ref)
-        if not definition:
-            return
-
-        # Calculate new width
-        original_width, height = definition.visual.get_pixel_size(self._grid)
-        new_width = original_width * instance.stretch_factor
-
-        # Update item rect
-        item.setRect(0, 0, new_width, height)
-
-        # Recreate composite view with stretch
-        if hasattr(item, '_composite_view') and item._composite_view:
-            item._composite_view.clear_internal_items()
-            from PySide6.QtCore import QRectF
-            new_bounds = QRectF(0, 0, new_width, height)
-            item._composite_view._bounds = new_bounds
-            item._composite_view.setRect(new_bounds)
-            item._composite_view._stretch_factor = instance.stretch_factor
-            item._composite_view._create_internal_visualization()
-
-        # Update port positions
-        self._update_stretched_ports(item, instance.stretch_factor)
-
-    def _update_stretched_ports(self, item: "ComponentItem", stretch_factor: float) -> None:
+    def _update_stretched_ports(self, item: "ComponentItem") -> None:
         """Update port positions for a stretched component.
 
         Args:
             item: The component graphics item.
-            stretch_factor: The horizontal stretch factor.
         """
         for port_name, port_item in item._port_items.items():
             port = port_item._port
             if port.position:
                 # Scale x position by stretch factor
-                x_px = self._grid.to_pixels(port.position[0]) * stretch_factor
+                x_px = self._grid.to_pixels(port.position[0])
                 y_px = self._grid.to_pixels(port.position[1])
                 port_item.setPos(x_px, y_px)
             elif port.direction.value == "out":

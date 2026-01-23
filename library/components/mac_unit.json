@@ -14,8 +14,7 @@
       "pipeline_stage": null,
       "instance_name": "multiplier",
       "is_composite": false,
-      "stage_count": 1,
-      "stretch_factor": 1.0
+      "stage_count": 1
     },
     {
       "id": "a0ac0002-0002-0002-0002-000000000002",
@@ -30,8 +29,7 @@
       "pipeline_stage": 1,
       "instance_name": "mult_reg",
       "is_composite": false,
-      "stage_count": 1,
-      "stretch_factor": 1.0
+      "stage_count": 1
     },
     {
       "id": "a0ac0003-0003-0003-0003-000000000003",
@@ -46,8 +44,7 @@
       "pipeline_stage": null,
       "instance_name": "accumulator",
       "is_composite": false,
-      "stage_count": 1,
-      "stretch_factor": 1.0
+      "stage_count": 1
     },
     {
       "id": "a0ac0004-0004-0004-0004-000000000004",
@@ -62,8 +59,7 @@
       "pipeline_stage": 2,
       "instance_name": "acc_reg",
       "is_composite": false,
-      "stage_count": 1,
-      "stretch_factor": 1.0
+      "stage_count": 1
     }
   ],
   "connections": [

@@ -13,7 +13,6 @@
       "instance_name": null,
       "is_composite": false,
       "stage_count": 1,
-      "stretch_factor": 1.0,
       "alignment_index": 1
     },
     {
@@ -28,7 +27,6 @@
       "instance_name": null,
       "is_composite": false,
       "stage_count": 1,
-      "stretch_factor": 1.0,
       "alignment_index": 0
     },
     {
@@ -43,7 +41,6 @@
       "instance_name": null,
       "is_composite": false,
       "stage_count": 1,
-      "stretch_factor": 1.0,
       "alignment_index": 0
     },
     {
@@ -58,7 +55,6 @@
       "instance_name": null,
       "is_composite": false,
       "stage_count": 1,
-      "stretch_factor": 1.0,
       "alignment_index": 0
     },
     {
@@ -73,7 +69,6 @@
       "instance_name": null,
       "is_composite": false,
       "stage_count": 1,
-      "stretch_factor": 1.0,
       "alignment_index": 2
     }
   ],

@@ -194,7 +194,6 @@ class ComponentItem(QGraphicsRectItem):
             library=self._library,
             bounds=rect,
             grid=self._grid,
-            stretch_factor=self._instance.stretch_factor,
             parent=self,
         )
 

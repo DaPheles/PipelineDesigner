@@ -84,9 +84,6 @@ class ComponentInstance(BaseModel):
     stage_count: int = Field(
         default=1, description="Number of stages this component spans"
     )
-    stretch_factor: float = Field(
-        default=1.0, description="Horizontal stretch factor for composite components"
-    )
     # Stage alignment index: 0 = left of first stage, 1 = between stage 1 and 2, etc.
     alignment_index: int = Field(
         default=0, description="Alignment slot index relative to register stages"
