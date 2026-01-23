@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from pipeline_designer.domain.models import ComponentDefinition, Design
 from pipeline_designer.infrastructure.persistence import LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
-from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, PortItem
+from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, InterfacePortItem, PortItem
 from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
 
 from .config import AppConfig
@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self._view.zoom_changed.connect(self._on_zoom_changed)
         self._scene.selectionChanged.connect(self._on_selection_changed)
         self._property_editor.port_changed.connect(self._on_port_changed)
+        self._property_editor.interface_port_changed.connect(self._on_interface_port_changed)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -255,7 +256,11 @@ class MainWindow(QMainWindow):
 
         item = selected[0]
 
-        if isinstance(item, PortItem):
+        if isinstance(item, InterfacePortItem):
+            # Interface port selected - show interface port properties
+            interface_port = item.get_interface_port()
+            self._property_editor.set_interface_port(interface_port)
+        elif isinstance(item, PortItem):
             # Port selected - show port properties
             port = item.get_port()
             component_id = item.get_component_id()
@@ -314,6 +319,25 @@ class MainWindow(QMainWindow):
             if property_name == "name" and new_value != port_name:
                 del comp_item._port_items[port_name]
                 comp_item._port_items[new_value] = port_item
+
+    def _on_interface_port_changed(
+        self, port_id, property_name: str, new_value
+    ) -> None:
+        """Handle interface port property changes from the property editor.
+
+        Args:
+            port_id: UUID of the interface port.
+            property_name: Name of the property that changed ('name' or 'data_type').
+            new_value: The new value of the property.
+        """
+        if port_id is None:
+            return
+
+        # Get the interface port item and update its display
+        port_item = self._scene.get_interface_port_item(port_id)
+        if port_item:
+            # Force a repaint to update the label
+            port_item.update()
 
     def get_scene(self) -> DesignScene:
         """Get the design scene."""

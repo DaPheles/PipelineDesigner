@@ -22,6 +22,8 @@ from pipeline_designer.domain.models import (
     ComponentInstance,
     Connection,
     Generic,
+    InterfaceDirection,
+    InterfacePort,
     Port,
     PortDirection,
 )
@@ -40,6 +42,8 @@ class PropertyEditor(QWidget):
     connection_changed = Signal(object, str, object)
     # Emitted when a port property changes: (component_id, port_name, property_name, new_value)
     port_changed = Signal(object, str, str, object)
+    # Emitted when an interface port property changes: (port_id, property_name, new_value)
+    interface_port_changed = Signal(object, str, object)
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize the property editor.
@@ -54,6 +58,7 @@ class PropertyEditor(QWidget):
         self._current_connection: Connection | None = None
         self._current_port: Port | None = None
         self._current_port_component_id: UUID | None = None
+        self._current_interface_port: InterfacePort | None = None
         self._property_widgets: dict[str, QWidget] = {}
 
         # Common VHDL/Verilog data types
@@ -128,6 +133,7 @@ class PropertyEditor(QWidget):
         self._current_connection = None
         self._current_port = None
         self._current_port_component_id = None
+        self._current_interface_port = None
 
     def clear(self) -> None:
         """Clear the property editor (public interface)."""
@@ -445,6 +451,96 @@ class PropertyEditor(QWidget):
                     self._current_port.name,
                     "data_type",
                     new_type,
+                )
+
+    def set_interface_port(self, interface_port: InterfacePort) -> None:
+        """Set the interface port to edit.
+
+        Args:
+            interface_port: The interface port to edit.
+        """
+        self._clear_content()
+        self._current_instance = None
+        self._current_definition = None
+        self._current_connection = None
+        self._current_port = None
+        self._current_port_component_id = None
+        self._current_interface_port = interface_port
+
+        # Title
+        direction_str = "Input" if interface_port.direction == InterfaceDirection.INPUT else "Output"
+        self._title_label.setText(f"Interface Port ({direction_str})")
+
+        # Port name (editable)
+        name_edit = QLineEdit()
+        name_edit.setText(interface_port.name)
+        name_edit.editingFinished.connect(
+            lambda: self._on_interface_port_name_changed(name_edit.text())
+        )
+        self._content_layout.addRow("Name:", name_edit)
+        self._property_widgets["interface_port_name"] = name_edit
+
+        # Data type (editable with dropdown)
+        type_combo = QComboBox()
+        type_combo.setEditable(True)  # Allow custom types
+        type_combo.addItems(self._data_types)
+
+        # Set current value
+        current_type = interface_port.data_type
+        index = type_combo.findText(current_type)
+        if index >= 0:
+            type_combo.setCurrentIndex(index)
+        else:
+            type_combo.setCurrentText(current_type)
+
+        type_combo.currentTextChanged.connect(self._on_interface_port_type_changed)
+        self._content_layout.addRow("Data Type:", type_combo)
+        self._property_widgets["interface_port_type"] = type_combo
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        self._content_layout.addRow(sep)
+
+        # Direction (read-only)
+        direction_label = QLabel(interface_port.direction.value)
+        if interface_port.direction == InterfaceDirection.INPUT:
+            direction_label.setStyleSheet("color: #27ae60;")  # Green for input
+        else:
+            direction_label.setStyleSheet("color: #e67e22;")  # Orange for output
+        self._content_layout.addRow("Direction:", direction_label)
+
+        # Position (read-only, if set)
+        if interface_port.position:
+            pos_label = QLabel(f"({interface_port.position[0]}, {interface_port.position[1]})")
+            pos_label.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Position:", pos_label)
+
+        # ID (read-only, abbreviated)
+        id_label = QLabel(str(interface_port.id)[:8])
+        id_label.setStyleSheet("color: #888; font-family: monospace;")
+        self._content_layout.addRow("ID:", id_label)
+
+    def _on_interface_port_name_changed(self, name: str) -> None:
+        """Handle interface port name change."""
+        if self._current_interface_port:
+            new_name = name.strip()
+            if new_name and new_name != self._current_interface_port.name:
+                old_name = self._current_interface_port.name
+                self._current_interface_port.name = new_name
+                self.interface_port_changed.emit(
+                    self._current_interface_port.id, "name", new_name
+                )
+
+    def _on_interface_port_type_changed(self, data_type: str) -> None:
+        """Handle interface port data type change."""
+        if self._current_interface_port:
+            new_type = data_type.strip()
+            if new_type and new_type != self._current_interface_port.data_type:
+                self._current_interface_port.data_type = new_type
+                self.interface_port_changed.emit(
+                    self._current_interface_port.id, "data_type", new_type
                 )
 
     def update_position(self, x: float, y: float) -> None:

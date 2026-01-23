@@ -160,8 +160,10 @@ class PortItem(QGraphicsEllipseItem):
             # For output ports, also start connection
             if self.is_output() and self.on_connection_start:
                 self.on_connection_start()
-                # Don't call super - let scene handle mouse tracking
-                return
+
+            # Accept the event to prevent propagation to parent
+            event.accept()
+            return
 
         super().mousePressEvent(event)
 
