@@ -1,9 +1,11 @@
 """Property editor panel for editing selected component/connection properties."""
 
 from typing import Any
+from uuid import UUID
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFormLayout,
     QFrame,
     QLabel,
@@ -20,6 +22,8 @@ from pipeline_designer.domain.models import (
     ComponentInstance,
     Connection,
     Generic,
+    Port,
+    PortDirection,
 )
 
 
@@ -34,6 +38,8 @@ class PropertyEditor(QWidget):
     property_changed = Signal(object, str, object)
     # Emitted when a connection property changes: (connection_id, property_name, new_value)
     connection_changed = Signal(object, str, object)
+    # Emitted when a port property changes: (component_id, port_name, property_name, new_value)
+    port_changed = Signal(object, str, str, object)
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize the property editor.
@@ -46,7 +52,26 @@ class PropertyEditor(QWidget):
         self._current_instance: ComponentInstance | None = None
         self._current_definition: ComponentDefinition | None = None
         self._current_connection: Connection | None = None
+        self._current_port: Port | None = None
+        self._current_port_component_id: UUID | None = None
         self._property_widgets: dict[str, QWidget] = {}
+
+        # Common VHDL/Verilog data types
+        self._data_types = [
+            "std_logic",
+            "std_logic_vector",
+            "signed",
+            "unsigned",
+            "integer",
+            "natural",
+            "positive",
+            "boolean",
+            "bit",
+            "bit_vector",
+            "real",
+            "time",
+            "string",
+        ]
 
         self._setup_ui()
 
@@ -101,6 +126,8 @@ class PropertyEditor(QWidget):
         self._current_instance = None
         self._current_definition = None
         self._current_connection = None
+        self._current_port = None
+        self._current_port_component_id = None
 
     def clear(self) -> None:
         """Clear the property editor (public interface)."""
@@ -308,6 +335,117 @@ class PropertyEditor(QWidget):
             self.connection_changed.emit(
                 self._current_connection.id, "signal_name", new_name
             )
+
+    def set_port(
+        self,
+        port: Port,
+        component_id: UUID,
+        component_name: str = "",
+    ) -> None:
+        """Set the port to edit.
+
+        Args:
+            port: The port to edit.
+            component_id: ID of the component this port belongs to.
+            component_name: Display name of the parent component.
+        """
+        self._clear_content()
+        self._current_instance = None
+        self._current_definition = None
+        self._current_connection = None
+        self._current_port = port
+        self._current_port_component_id = component_id
+
+        # Title
+        direction_str = "Input" if port.direction == PortDirection.IN else "Output"
+        self._title_label.setText(f"Port ({direction_str})")
+
+        # Port name (editable)
+        name_edit = QLineEdit()
+        name_edit.setText(port.name)
+        name_edit.editingFinished.connect(
+            lambda: self._on_port_name_changed(name_edit.text())
+        )
+        self._content_layout.addRow("Name:", name_edit)
+        self._property_widgets["port_name"] = name_edit
+
+        # Data type (editable with dropdown)
+        type_combo = QComboBox()
+        type_combo.setEditable(True)  # Allow custom types
+        type_combo.addItems(self._data_types)
+
+        # Set current value
+        current_type = port.data_type
+        index = type_combo.findText(current_type)
+        if index >= 0:
+            type_combo.setCurrentIndex(index)
+        else:
+            type_combo.setCurrentText(current_type)
+
+        type_combo.currentTextChanged.connect(self._on_port_type_changed)
+        self._content_layout.addRow("Data Type:", type_combo)
+        self._property_widgets["port_type"] = type_combo
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        self._content_layout.addRow(sep)
+
+        # Direction (read-only)
+        direction_label = QLabel(port.direction.value)
+        if port.direction == PortDirection.IN:
+            direction_label.setStyleSheet("color: #70ad47;")  # Green for input
+        else:
+            direction_label.setStyleSheet("color: #ed7d31;")  # Orange for output
+        self._content_layout.addRow("Direction:", direction_label)
+
+        # Parent component (read-only)
+        if component_name:
+            comp_label = QLabel(component_name)
+            comp_label.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Component:", comp_label)
+
+        # Position (read-only, if set)
+        if port.position:
+            pos_label = QLabel(f"({port.position[0]}, {port.position[1]})")
+            pos_label.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Position:", pos_label)
+
+        # Special flags (read-only)
+        if port.is_clock:
+            clock_label = QLabel("Yes")
+            clock_label.setStyleSheet("color: #5b9bd5; font-weight: bold;")
+            self._content_layout.addRow("Clock:", clock_label)
+
+        if port.is_reset:
+            reset_label = QLabel("Yes")
+            reset_label.setStyleSheet("color: #c45911; font-weight: bold;")
+            self._content_layout.addRow("Reset:", reset_label)
+
+    def _on_port_name_changed(self, name: str) -> None:
+        """Handle port name change."""
+        if self._current_port and self._current_port_component_id:
+            old_name = self._current_port.name
+            new_name = name.strip()
+            if new_name and new_name != old_name:
+                self._current_port.name = new_name
+                self.port_changed.emit(
+                    self._current_port_component_id, old_name, "name", new_name
+                )
+
+    def _on_port_type_changed(self, data_type: str) -> None:
+        """Handle port data type change."""
+        if self._current_port and self._current_port_component_id:
+            new_type = data_type.strip()
+            if new_type and new_type != self._current_port.data_type:
+                self._current_port.data_type = new_type
+                self.port_changed.emit(
+                    self._current_port_component_id,
+                    self._current_port.name,
+                    "data_type",
+                    new_type,
+                )
 
     def update_position(self, x: float, y: float) -> None:
         """Update the displayed position (called when component moves)."""

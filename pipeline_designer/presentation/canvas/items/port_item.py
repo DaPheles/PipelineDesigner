@@ -56,12 +56,15 @@ class PortItem(QGraphicsEllipseItem):
         # Callback for connection start (from output ports)
         self.on_connection_start: Callable[[], None] | None = None
 
+        # Callback for port selection
+        self.on_port_selected: Callable[["PortItem"], None] | None = None
+
         self._setup_item()
 
     def _setup_item(self) -> None:
         """Configure item settings."""
         self.setAcceptHoverEvents(True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setZValue(10)
 
         self._update_appearance()
@@ -97,6 +100,11 @@ class PortItem(QGraphicsEllipseItem):
     def get_port(self) -> Port:
         """Get the port model."""
         return self._port
+
+    def update_tooltip(self) -> None:
+        """Update the tooltip after port properties change."""
+        tooltip = f"{self._port.name}\nType: {self._port.data_type}\nDirection: {self._port.direction.value}"
+        self.setToolTip(tooltip)
 
     def is_output(self) -> bool:
         """Check if this is an output port."""
@@ -137,13 +145,24 @@ class PortItem(QGraphicsEllipseItem):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse press - start connection from output ports."""
-        if event.button() == Qt.MouseButton.LeftButton and self.is_output():
-            if self.on_connection_start:
+        """Handle mouse press - select port or start connection from output ports."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Clear other selections and select this port
+            scene = self.scene()
+            if scene:
+                scene.clearSelection()
+            self.setSelected(True)
+
+            # Notify selection callback
+            if self.on_port_selected:
+                self.on_port_selected(self)
+
+            # For output ports, also start connection
+            if self.is_output() and self.on_connection_start:
                 self.on_connection_start()
-            # Don't call super or accept - let scene handle mouse tracking
-            # The scene will disable component movement
-            return
+                # Don't call super - let scene handle mouse tracking
+                return
+
         super().mousePressEvent(event)
 
     def paint(

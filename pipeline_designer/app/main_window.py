@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from pipeline_designer.domain.models import ComponentDefinition, Design
 from pipeline_designer.infrastructure.persistence import LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
-from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem
+from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, PortItem
 from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
 
 from .config import AppConfig
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         # Connect signals
         self._view.zoom_changed.connect(self._on_zoom_changed)
         self._scene.selectionChanged.connect(self._on_selection_changed)
+        self._property_editor.port_changed.connect(self._on_port_changed)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -254,7 +255,15 @@ class MainWindow(QMainWindow):
 
         item = selected[0]
 
-        if isinstance(item, ComponentItem):
+        if isinstance(item, PortItem):
+            # Port selected - show port properties
+            port = item.get_port()
+            component_id = item.get_component_id()
+            component_name = ""
+            if component_id:
+                component_name = self._get_component_display_name(component_id)
+            self._property_editor.set_port(port, component_id, component_name)
+        elif isinstance(item, ComponentItem):
             instance = item.get_instance()
             definition = item.get_definition()
             self._property_editor.set_component(instance, definition)
@@ -273,6 +282,38 @@ class MainWindow(QMainWindow):
         if item:
             return item.get_instance().get_display_name()
         return str(component_id)[:8]
+
+    def _on_port_changed(
+        self, component_id, port_name: str, property_name: str, new_value
+    ) -> None:
+        """Handle port property changes from the property editor.
+
+        Args:
+            component_id: UUID of the component containing the port.
+            port_name: Name of the port (the old name if name was changed).
+            property_name: Name of the property that changed ('name' or 'data_type').
+            new_value: The new value of the property.
+        """
+        if component_id is None:
+            return
+
+        # Get the component item
+        comp_item = self._scene.get_component_item(component_id)
+        if comp_item is None:
+            return
+
+        # Find the port item by port_name (which is the dictionary key)
+        # Note: when name changes, port_name is the OLD name (still the dict key)
+        port_item = comp_item._port_items.get(port_name)
+
+        if port_item:
+            # Update the tooltip to reflect the new property value
+            port_item.update_tooltip()
+
+            # If name changed, update the dictionary key
+            if property_name == "name" and new_value != port_name:
+                del comp_item._port_items[port_name]
+                comp_item._port_items[new_value] = port_item
 
     def get_scene(self) -> DesignScene:
         """Get the design scene."""

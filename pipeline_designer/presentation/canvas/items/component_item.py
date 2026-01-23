@@ -75,6 +75,15 @@ class ComponentItem(QGraphicsRectItem):
         # Callback for stage-aware x snapping: (x) -> x
         self.snap_register_x: Callable[[float], float] | None = None
 
+        # Callback to avoid stage overlap: (x, width) -> adjusted_x
+        self.avoid_stage_overlap: Callable[[float, float], float] | None = None
+
+        # Callback to check distance conflicts during register movement: (x, stage_index) -> None
+        self.check_distance_conflicts: Callable[[float, int | None], None] | None = None
+
+        # Callback to clear distance conflict highlighting: () -> None
+        self.clear_distance_conflicts: Callable[[], None] | None = None
+
         # Callbacks for undo tracking
         self.on_move_start: Callable[[], None] | None = None
         self.on_move_end: Callable[[], None] | None = None
@@ -185,6 +194,7 @@ class ComponentItem(QGraphicsRectItem):
             library=self._library,
             bounds=rect,
             grid=self._grid,
+            stretch_factor=self._instance.stretch_factor,
             parent=self,
         )
 
@@ -232,6 +242,10 @@ class ComponentItem(QGraphicsRectItem):
                     new_x = self.snap_register_x(new_x)
                 else:
                     new_x = self._grid.snap_to_grid(new_x)
+                    # For non-registers, avoid overlapping with stages
+                    if self.avoid_stage_overlap and not self._is_register:
+                        width = self.rect().width()
+                        new_x = self.avoid_stage_overlap(new_x, width)
 
                 return QPointF(new_x, new_y)
 
@@ -243,11 +257,16 @@ class ComponentItem(QGraphicsRectItem):
             # Update instance position
             self._instance.position = (new_x, pos.y())
 
-            # For registers, notify if x position changed (stage change)
-            if self._is_register and new_x != old_x:
-                self._last_x = new_x
-                if self.register_moved:
-                    self.register_moved(self._instance, old_x)
+            # For registers, check distance conflicts and notify if x position changed
+            if self._is_register:
+                # Check for distance conflicts with other components
+                if self.check_distance_conflicts:
+                    self.check_distance_conflicts(new_x, self._instance.pipeline_stage)
+
+                if new_x != old_x:
+                    self._last_x = new_x
+                    if self.register_moved:
+                        self.register_moved(self._instance, old_x)
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_appearance()
@@ -355,4 +374,7 @@ class ComponentItem(QGraphicsRectItem):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.on_move_end:
                 self.on_move_end()
+            # Clear distance conflict highlighting for registers
+            if self._is_register and self.clear_distance_conflicts:
+                self.clear_distance_conflicts()
         super().mouseReleaseEvent(event)

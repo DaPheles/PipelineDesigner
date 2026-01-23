@@ -1,0 +1,38 @@
+{
+    "name": "Mult",
+    "category": "primitives",
+    "description": "Multiplier",
+    "ports": [
+        {
+            "name": "a",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 2]
+        },
+        {
+            "name": "b",
+            "direction": "in",
+            "data_type": "std_logic_vector",
+            "position": [0, 4]
+        },
+        {
+            "name": "prod",
+            "direction": "out",
+            "data_type": "std_logic_vector",
+            "position": [5, 3]
+        }
+    ],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 8
+        }
+    ],
+    "visual": {
+        "width": 5,
+        "height": 5,
+        "color": "#2040f0"
+    },
+    "latency": 0
+}

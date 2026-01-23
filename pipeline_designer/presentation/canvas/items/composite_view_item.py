@@ -224,7 +224,8 @@ class CompositeViewItem(QGraphicsRectItem):
     """Container for visualizing composite component internals.
 
     Creates read-only child items for all internal components, stages,
-    and connections using the original coordinate system (no scaling).
+    and connections using the original coordinate system.
+    Supports horizontal stretching when main design stage spacing differs.
     The design's visual.input_stage_x defines the origin offset.
     """
 
@@ -234,6 +235,7 @@ class CompositeViewItem(QGraphicsRectItem):
         library: dict[str, ComponentDefinition],
         bounds: QRectF,
         grid: GridConfig,
+        stretch_factor: float = 1.0,
         parent: QGraphicsItem | None = None,
     ):
         """Initialize composite view.
@@ -243,6 +245,7 @@ class CompositeViewItem(QGraphicsRectItem):
             library: Component library for looking up definitions.
             bounds: Bounding rectangle in parent coordinates.
             grid: Grid configuration.
+            stretch_factor: Horizontal stretch factor (1.0 = no stretch).
             parent: Parent graphics item.
         """
         super().__init__(parent)
@@ -250,6 +253,7 @@ class CompositeViewItem(QGraphicsRectItem):
         self._library = library
         self._grid = grid
         self._bounds = bounds
+        self._stretch_factor = stretch_factor
 
         # Make non-interactive
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
@@ -297,12 +301,22 @@ class CompositeViewItem(QGraphicsRectItem):
         y_offset = header_height + (available_height - content_height) / 2 - min_y
 
         # Create internal stage items first (background)
+        # Apply stretch factor to x positions and widths
         for stage in self._design.stages:
-            # Position relative to origin
-            stage_x = stage.x_position - origin_x
+            # Position relative to origin, with stretch applied
+            stage_x = (stage.x_position - origin_x) * self._stretch_factor
+            stage_width = stage.width * self._stretch_factor
             stage_height = content_height if content_height > 0 else self._bounds.height() - header_height
 
-            item = InternalStageItem(stage, stage_height, parent=self)
+            # Create a stretched copy of the stage for visualization
+            stretched_stage = Stage(
+                id=stage.id,
+                index=stage.index,
+                x_position=stage_x,  # Already transformed
+                width=stage_width,
+                register_ids=stage.register_ids,
+            )
+            item = InternalStageItem(stretched_stage, stage_height, parent=self)
             item.setPos(stage_x, y_offset + min_y)
             self._internal_items.append(item)
 
@@ -312,8 +326,8 @@ class CompositeViewItem(QGraphicsRectItem):
 
             item = InternalComponentItem(comp, definition, self._grid, parent=self)
 
-            # Position using original coordinates, offset by origin
-            x = comp.position[0] - origin_x
+            # Position using original coordinates, offset by origin, with stretch applied to x
+            x = (comp.position[0] - origin_x) * self._stretch_factor
             y = comp.position[1] + y_offset
             item.setPos(x, y)
 
@@ -395,11 +409,12 @@ class CompositeViewItem(QGraphicsRectItem):
             for iface in self._design.interface_ports:
                 if str(iface.id) == str(interface_port_id):
                     if iface.position:
-                        x = self._grid.to_pixels(iface.position[0]) - origin_x
+                        # Apply stretch factor to x coordinate
+                        x = (self._grid.to_pixels(iface.position[0]) - origin_x) * self._stretch_factor
                         y = self._grid.to_pixels(iface.position[1]) + y_offset
                         return QPointF(x, y)
                     else:
-                        # Fallback: left or right edge
+                        # Fallback: left or right edge (already at bounds)
                         if is_source:
                             return QPointF(0, self._bounds.height() / 2)
                         else:

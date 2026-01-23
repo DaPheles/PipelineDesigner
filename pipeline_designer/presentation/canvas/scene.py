@@ -93,6 +93,9 @@ class DesignScene(QGraphicsScene):
         self._interface_enabled = True  # Enable interface stages by default
         self._interface_port_items: dict[UUID, InterfacePortItem] = {}
 
+        # Track items with distance conflicts (made semi-transparent)
+        self._conflict_items: set[UUID] = set()
+
         self._setup_scene()
 
     def _setup_scene(self) -> None:
@@ -492,6 +495,9 @@ class DesignScene(QGraphicsScene):
         for connection in design.connections:
             self._create_connection_item(connection)
 
+        # Update alignment indices for all components
+        self._update_all_component_alignments()
+
         # Update bounds after all items are created
         self._update_component_bounds()
 
@@ -572,6 +578,11 @@ class DesignScene(QGraphicsScene):
             if composite_design:
                 stage_count = max(1, composite_design.latency)
 
+        # For non-register primitives, avoid placing on top of stages
+        if component_name != "Register" and not is_composite:
+            comp_width, _ = definition.visual.get_pixel_size(self._grid)
+            x = self._avoid_stage_overlap(x, comp_width)
+
         instance = ComponentInstance(
             definition_ref=component_name,
             position=(x, y),
@@ -585,9 +596,15 @@ class DesignScene(QGraphicsScene):
         # Handle stage assignment for registers
         if component_name == "Register":
             self._assign_register_to_stage(instance)
+            # Adding a register may create a new stage, update all alignments
+            self._update_all_component_alignments()
         # Handle stage alignment for composite components
         elif is_composite and stage_count > 1:
             self._assign_composite_to_stages(instance)
+            self._update_all_component_alignments()
+        else:
+            # Update alignment index for non-register primitives
+            self._update_component_alignment(instance)
 
         self.component_added.emit(instance)
 
@@ -632,8 +649,9 @@ class DesignScene(QGraphicsScene):
         """Assign a composite component to pipeline stages.
 
         Synchronizes the composite's internal register stages with the main
-        design's stages. The component is positioned so that its internal
-        stages align with existing or newly created main design stages.
+        design's stages. Handles spacing differences by either:
+        - Shifting main design stages/elements if composite needs more space
+        - Stretching the composite if main design has larger stage spacing
         """
         if not self._library_loader:
             return
@@ -667,16 +685,22 @@ class DesignScene(QGraphicsScene):
 
             instance.pipeline_stage = nearest_stage.index
 
+            # Handle spacing differences for multi-stage composites
+            if len(internal_stage_offsets) > 1:
+                self._synchronize_stage_spacing(
+                    composite_design, instance, component_x,
+                    nearest_stage.index, internal_stage_offsets
+                )
+
             # Update position
             item = self._component_items.get(instance.id)
             if item:
                 item.setPos(component_x, drop_y)
                 instance.position = (component_x, drop_y)
+                # Apply stretch if needed
+                if instance.stretch_factor != 1.0:
+                    self._apply_component_stretch(item, instance, composite_design)
 
-            # Create additional stages if needed for remaining internal stages
-            self._ensure_stages_for_composite(
-                composite_design, instance, component_x, nearest_stage.index
-            )
         else:
             # No stages exist - create stages based on internal stage positions
             self._create_stages_from_composite(composite_design, instance, drop_x)
@@ -737,6 +761,168 @@ class DesignScene(QGraphicsScene):
             return nearest
 
         return None
+
+    def _synchronize_stage_spacing(
+        self,
+        composite_design: Design,
+        instance: ComponentInstance,
+        component_x: float,
+        first_stage_index: int,
+        internal_offsets: list[float],
+    ) -> None:
+        """Synchronize stage spacing between composite and main design.
+
+        Compares the composite's internal stage spacing with the main design's
+        stage spacing and adjusts accordingly:
+        - If composite needs more space: shift stages/elements to the right
+        - If main design has more space: stretch the composite
+
+        Args:
+            composite_design: The composite component's internal design.
+            instance: The composite component instance.
+            component_x: The component's x position.
+            first_stage_index: Index of the first aligned stage.
+            internal_offsets: List of internal stage x offsets from component origin.
+        """
+        if len(internal_offsets) < 2:
+            return
+
+        # Calculate internal stage spacing (distance between consecutive internal stages)
+        internal_spacings = []
+        for i in range(1, len(internal_offsets)):
+            spacing = internal_offsets[i] - internal_offsets[i - 1]
+            internal_spacings.append(spacing)
+
+        # Get main design stage spacing at the insertion point
+        sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
+        main_spacings = []
+        for i in range(1, len(sorted_stages)):
+            spacing = sorted_stages[i].x_position - sorted_stages[i - 1].x_position
+            main_spacings.append(spacing)
+
+        if not main_spacings:
+            # Only one stage exists, use default spacing
+            main_spacing = self._grid.to_pixels(10)
+        else:
+            # Use average spacing or spacing at insertion point
+            main_spacing = sum(main_spacings) / len(main_spacings)
+
+        # Compare first internal spacing with main spacing
+        first_internal_spacing = internal_spacings[0] if internal_spacings else 0
+
+        if first_internal_spacing > main_spacing + self._grid.size:
+            # Composite needs more space - shift stages and elements
+            extra_space = first_internal_spacing - main_spacing
+            self._shift_elements_right(component_x, first_stage_index, extra_space)
+        elif main_spacing > first_internal_spacing + self._grid.size:
+            # Main design has more space - stretch composite
+            stretch_factor = main_spacing / first_internal_spacing if first_internal_spacing > 0 else 1.0
+            instance.stretch_factor = stretch_factor
+
+    def _shift_elements_right(
+        self,
+        from_x: float,
+        from_stage_index: int,
+        shift_amount: float,
+    ) -> None:
+        """Shift all stages and components to the right of a position.
+
+        Args:
+            from_x: X position from which to start shifting.
+            from_stage_index: Stage index from which to start shifting.
+            shift_amount: Amount to shift in pixels.
+        """
+        shift_amount = self._grid.snap_to_grid(shift_amount)
+        if shift_amount <= 0:
+            return
+
+        # Shift stages at or after from_stage_index (except the first aligned one)
+        for stage in self._design.stages:
+            if stage.index > from_stage_index:
+                stage.x_position += shift_amount
+
+        # Shift components to the right of from_x
+        for comp_id, item in self._component_items.items():
+            comp_instance = item.get_instance()
+            comp_x = comp_instance.position[0]
+
+            # Get component width to check if it's fully to the right
+            definition = self._library.get(comp_instance.definition_ref)
+            if definition:
+                comp_width, _ = definition.visual.get_pixel_size(self._grid)
+            else:
+                comp_width = self._grid.to_pixels(4)
+
+            # Shift if component starts after from_x (with some tolerance)
+            if comp_x > from_x + comp_width / 2:
+                new_x = comp_x + shift_amount
+                new_y = comp_instance.position[1]
+                comp_instance.position = (new_x, new_y)
+                item.setPos(new_x, new_y)
+
+        # Update connections
+        self.update_connection_positions()
+
+    def _apply_component_stretch(
+        self,
+        item: "ComponentItem",
+        instance: ComponentInstance,
+        composite_design: Design,
+    ) -> None:
+        """Apply stretch factor to a composite component.
+
+        Updates the component's visual width and recreates its internal view.
+
+        Args:
+            item: The component graphics item.
+            instance: The component instance.
+            composite_design: The composite's internal design.
+        """
+        if instance.stretch_factor == 1.0:
+            return
+
+        definition = self._library.get(instance.definition_ref)
+        if not definition:
+            return
+
+        # Calculate new width
+        original_width, height = definition.visual.get_pixel_size(self._grid)
+        new_width = original_width * instance.stretch_factor
+
+        # Update item rect
+        item.setRect(0, 0, new_width, height)
+
+        # Recreate composite view with stretch
+        if hasattr(item, '_composite_view') and item._composite_view:
+            item._composite_view.clear_internal_items()
+            from PySide6.QtCore import QRectF
+            new_bounds = QRectF(0, 0, new_width, height)
+            item._composite_view._bounds = new_bounds
+            item._composite_view.setRect(new_bounds)
+            item._composite_view._stretch_factor = instance.stretch_factor
+            item._composite_view._create_internal_visualization()
+
+        # Update port positions
+        self._update_stretched_ports(item, instance.stretch_factor)
+
+    def _update_stretched_ports(self, item: "ComponentItem", stretch_factor: float) -> None:
+        """Update port positions for a stretched component.
+
+        Args:
+            item: The component graphics item.
+            stretch_factor: The horizontal stretch factor.
+        """
+        for port_name, port_item in item._port_items.items():
+            port = port_item._port
+            if port.position:
+                # Scale x position by stretch factor
+                x_px = self._grid.to_pixels(port.position[0]) * stretch_factor
+                y_px = self._grid.to_pixels(port.position[1])
+                port_item.setPos(x_px, y_px)
+            elif port.direction.value == "out":
+                # Output ports move with the right edge
+                rect = item.rect()
+                port_item.setPos(rect.width(), port_item.pos().y())
 
     def _ensure_stages_for_composite(
         self,
@@ -860,6 +1046,54 @@ class DesignScene(QGraphicsScene):
             if item.is_register():
                 item.update()
 
+    def _calculate_alignment_index(self, x: float) -> int:
+        """Calculate the alignment index for a component at position x.
+
+        Alignment indices:
+        - 0: Left of the first stage
+        - 1: Between stage 1 and stage 2
+        - 2: Between stage 2 and stage 3
+        - ...
+        - N: Right of stage N (where N is the last stage index)
+
+        Args:
+            x: X position of the component.
+
+        Returns:
+            The alignment index (0 to number of stages).
+        """
+        if not self._design.stages:
+            return 0
+
+        sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
+
+        # Check each stage boundary
+        for i, stage in enumerate(sorted_stages):
+            if x < stage.x_position:
+                return i
+
+        # Component is to the right of all stages
+        return len(sorted_stages)
+
+    def _update_component_alignment(self, instance: ComponentInstance) -> None:
+        """Update the alignment index for a single component.
+
+        Args:
+            instance: The component instance to update.
+        """
+        # Registers don't need alignment index - they define stages
+        if instance.definition_ref == "Register":
+            return
+
+        instance.alignment_index = self._calculate_alignment_index(instance.position[0])
+
+    def _update_all_component_alignments(self) -> None:
+        """Update alignment indices for all non-register components."""
+        for comp_id, item in self._component_items.items():
+            instance = item.get_instance()
+            if instance.definition_ref != "Register":
+                instance.alignment_index = self._calculate_alignment_index(instance.position[0])
+
     def _create_component_item(self, instance: ComponentInstance) -> ComponentItem:
         """Create a graphics item for a component instance."""
         definition = self._library.get(instance.definition_ref)
@@ -887,6 +1121,11 @@ class DesignScene(QGraphicsScene):
         if instance.definition_ref == "Register":
             item.register_moved = self._on_register_moved
             item.snap_register_x = self.snap_register_x
+            item.check_distance_conflicts = self._check_distance_conflicts
+            item.clear_distance_conflicts = self._clear_distance_conflicts
+        else:
+            # Non-registers should avoid overlapping with stages
+            item.avoid_stage_overlap = self._avoid_stage_overlap
 
         # Wire up port callbacks for connections
         self._wire_port_callbacks(item)
@@ -1332,6 +1571,7 @@ class DesignScene(QGraphicsScene):
         self._update_all_pipeline_stages()
         self._rebuild_all_stages()
         self._update_register_displays()
+        self._update_all_component_alignments()
         self.stages_changed.emit()
 
     def remove_component(self, component_id: UUID) -> bool:
@@ -1444,6 +1684,56 @@ class DesignScene(QGraphicsScene):
             self._grid.snap_to_grid(y),
         )
 
+    def _avoid_stage_overlap(self, x: float, width: float, _depth: int = 0) -> float:
+        """Adjust x position to avoid overlapping with register stages.
+
+        Maintains a minimum distance of 2 grid units from any stage.
+
+        Args:
+            x: Proposed x position of the component.
+            width: Width of the component.
+            _depth: Recursion depth (internal use).
+
+        Returns:
+            Adjusted x position that avoids stage overlap.
+        """
+        if not self._design.stages or _depth > 10:
+            return x
+
+        min_gap = self._grid.to_pixels(2)  # 2 grid units minimum distance
+        comp_left = x
+        comp_right = x + width
+
+        # Sort stages by position for consistent behavior
+        sorted_stages = sorted(self._design.stages, key=lambda s: s.x_position)
+
+        # Check each stage for potential overlap
+        for stage in sorted_stages:
+            stage_left = stage.x_position
+            stage_right = stage.x_position + stage.width
+
+            # Check if component overlaps with stage (including gap)
+            if comp_left < stage_right + min_gap and comp_right > stage_left - min_gap:
+                # Determine which side to push the component
+                # Prefer the direction with more space
+                dist_to_left = comp_right - (stage_left - min_gap)
+                dist_to_right = (stage_right + min_gap) - comp_left
+
+                if dist_to_left <= dist_to_right:
+                    # Push component to the left of the stage
+                    new_x = stage_left - min_gap - width
+                else:
+                    # Push component to the right of the stage
+                    new_x = stage_right + min_gap
+
+                # Snap to grid
+                new_x = self._grid.snap_to_grid(new_x)
+
+                # Recursively check if new position overlaps with other stages
+                return self._avoid_stage_overlap(new_x, width, _depth + 1)
+
+        return x
+
     def snap_register_x(self, x: float) -> float:
         """Snap x coordinate for a register (stage-aware)."""
         stage = self._design.get_stage_at_x(x)
@@ -1452,6 +1742,71 @@ class DesignScene(QGraphicsScene):
         if self._snap_to_grid:
             return self._grid.snap_to_grid(x)
         return x
+
+    def _check_distance_conflicts(self, register_x: float, aligned_stage_index: int | None) -> None:
+        """Check for distance conflicts during register/stage movement.
+
+        Makes conflicting components semi-transparent (alpha 0.5).
+        Excludes the register's aligned stage from conflict checking.
+
+        Args:
+            register_x: Current x position of the register being moved.
+            aligned_stage_index: Index of the stage this register is aligned to (excluded from check).
+        """
+        min_gap = self._grid.to_pixels(2)  # 2 grid units minimum distance
+
+        # Get the stage at the register's position (or where it will create one)
+        stage_at_x = self._design.get_stage_at_x(register_x)
+        if stage_at_x:
+            stage_left = stage_at_x.x_position
+            stage_right = stage_at_x.x_position + stage_at_x.width
+        else:
+            # Register will create a new stage here
+            stage_left = register_x
+            stage_right = register_x + self._register_width
+
+        # Check all non-register components for conflicts
+        for comp_id, item in self._component_items.items():
+            instance = item.get_instance()
+
+            # Skip registers - they can overlap with stages
+            if instance.definition_ref == "Register":
+                continue
+
+            definition = self._library.get(instance.definition_ref)
+            if definition:
+                comp_width, _ = definition.visual.get_pixel_size(self._grid)
+            else:
+                comp_width = self._grid.to_pixels(4)
+
+            comp_left = instance.position[0]
+            comp_right = comp_left + comp_width
+
+            # Check if component is too close to the stage
+            is_conflict = (
+                comp_left < stage_right + min_gap and
+                comp_right > stage_left - min_gap
+            )
+
+            if is_conflict:
+                if comp_id not in self._conflict_items:
+                    self._conflict_items.add(comp_id)
+                    item.setOpacity(0.5)
+            else:
+                if comp_id in self._conflict_items:
+                    self._conflict_items.discard(comp_id)
+                    item.setOpacity(1.0)
+
+    def _clear_distance_conflicts(self) -> None:
+        """Clear all distance conflict highlighting.
+
+        Restores opacity to 1.0 for all previously conflicting items.
+        """
+        for comp_id in list(self._conflict_items):
+            item = self._component_items.get(comp_id)
+            if item:
+                item.setOpacity(1.0)
+        self._conflict_items.clear()
 
     def set_snap_to_grid(self, enabled: bool) -> None:
         """Enable or disable grid snapping."""
@@ -1543,3 +1898,7 @@ class DesignScene(QGraphicsScene):
             # Don't execute - movement already happened, just record for undo
             self._undo_stack._undo_stack.append(command)
             self._undo_stack._redo_stack.clear()
+
+            # Update alignment index for the moved component
+            instance = item.get_instance()
+            self._update_component_alignment(instance)
