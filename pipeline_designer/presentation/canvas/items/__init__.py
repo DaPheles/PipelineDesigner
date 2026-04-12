@@ -8,6 +8,7 @@ from .interface_port_item import InterfacePortItem
 from .interface_stage_item import InterfaceStageItem
 from .port_item import PortItem
 from .stage_item import StageItem
+from .temp_position_overlay_item import TempPositionOverlayItem
 
 __all__ = [
     "PortItem",
@@ -19,4 +20,5 @@ __all__ = [
     "InterfaceStageItem",
     "InterfacePortItem",
     "ComponentBoundsItem",
+    "TempPositionOverlayItem",
 ]

@@ -85,9 +85,20 @@ class ComponentItem(QGraphicsRectItem):
         # Callback to clear distance conflict highlighting: () -> None
         self.clear_distance_conflicts: Callable[[], None] | None = None
 
+        # Callback fired during drag of a composite component: (instance, pos) -> None
+        self.on_composite_drag_update: Callable[[ComponentInstance, "QPointF"], None] | None = None  # noqa: F821
+
+        # Callback that snaps a composite's x position to align its internal
+        # stages with main-design stages: (x_px) -> snapped_x_px
+        self.snap_composite_x: Callable[[float], float] | None = None
+
         # Callbacks for undo tracking
         self.on_move_start: Callable[[], None] | None = None
         self.on_move_end: Callable[[], None] | None = None
+
+        # Internal state flags
+        self._is_temporary: bool = False       # orange dashed border when True
+        self._suppress_callbacks: bool = False  # set True during programmatic moves
 
         self._setup_item()
         self._create_ports()
@@ -118,6 +129,10 @@ class ComponentItem(QGraphicsRectItem):
         if self.isSelected():
             pen = QPen(QColor("#ffffff"))
             pen.setWidth(3)
+        elif self._is_temporary:
+            pen = QPen(QColor("#ff8800"))
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.DashLine)
         else:
             pen = QPen(self._base_color.darker(150))
             pen.setWidth(2)
@@ -218,6 +233,31 @@ class ComponentItem(QGraphicsRectItem):
         """Get a port item by name."""
         return self._port_items.get(port_name)
 
+    def set_temporary(self, is_temp: bool) -> None:
+        """Toggle the orange dashed 'temporary position' border.
+
+        Args:
+            is_temp: True to show the temporary indicator, False to clear it.
+        """
+        if self._is_temporary == is_temp:
+            return
+        self._is_temporary = is_temp
+        self._update_appearance()
+        self.update()
+
+    def set_position_no_callbacks(self, x: float, y: float) -> None:
+        """Set position programmatically without triggering stage/undo callbacks.
+
+        Used during stage group-moves when the scene positions registers directly.
+
+        Args:
+            x: X position in pixels.
+            y: Y position in pixels.
+        """
+        self._suppress_callbacks = True
+        self.setPos(x, y)
+        self._suppress_callbacks = False
+
     def get_port_scene_pos(self, port_name: str) -> tuple[float, float] | None:
         """Get a port's position in scene coordinates."""
         port_item = self._port_items.get(port_name)
@@ -237,19 +277,27 @@ class ComponentItem(QGraphicsRectItem):
                 new_x = value.x()
                 new_y = self._grid.snap_to_grid(value.y())
 
-                # For registers, use stage-aware x snapping
                 if self._is_register and self.snap_register_x:
+                    # Registers snap to the stage they belong to
                     new_x = self.snap_register_x(new_x)
+                elif self._is_composite and self.snap_composite_x:
+                    # Composites snap so their first internal stage aligns with a
+                    # main-design stage when close enough; otherwise plain grid snap
+                    new_x = self.snap_composite_x(new_x)
                 else:
+                    # Plain grid snap for all other non-register components.
+                    # Position is NOT hard-constrained by stage bands – invalid
+                    # placements are communicated visually, not blocked.
                     new_x = self._grid.snap_to_grid(new_x)
-                    # For non-registers, avoid overlapping with stages
-                    if self.avoid_stage_overlap and not self._is_register:
-                        width = self.rect().width()
-                        new_x = self.avoid_stage_overlap(new_x, width)
 
                 return QPointF(new_x, new_y)
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            # When _suppress_callbacks is set the scene is moving this item
+            # programmatically (e.g. stage group-move) – skip all side-effects.
+            if self._suppress_callbacks:
+                return super().itemChange(change, value)
+
             pos = value
             # pos is in pixels (scene coordinates)
             new_x_px = pos.x()
@@ -273,6 +321,10 @@ class ComponentItem(QGraphicsRectItem):
                     self._last_x = new_x_grid
                     if self.register_moved:
                         self.register_moved(self._instance, old_x_grid)
+
+            # For composites, notify the scene so it can update alignment previews
+            elif self._is_composite and self.on_composite_drag_update:
+                self.on_composite_drag_update(self._instance, pos)
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_appearance()

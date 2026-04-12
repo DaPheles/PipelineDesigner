@@ -34,6 +34,10 @@ class GridConfig(BaseModel):
         """Snap a pixel value to the nearest grid intersection."""
         return round(pixels / self.size) * self.size
 
+    def snap_to_grid_units(self, grid_units: float) -> float:
+        """Snap a value already expressed in grid units to the nearest integer."""
+        return float(round(grid_units))
+
     def pos_to_pixels(self, pos: tuple[float, float]) -> tuple[float, float]:
         """Convert a position from grid units to pixels."""
         return (self.to_pixels(pos[0]), self.to_pixels(pos[1]))

@@ -163,6 +163,85 @@ class RemoveConnectionCommand(Command):
         return "Remove connection"
 
 
+@dataclass
+class MoveStageCommand(Command):
+    """Command for moving an entire stage (all its registers) as an atomic group.
+
+    Stores the full before/after state so undo/redo can restore positions of
+    registers, the stage model itself, and any composite stage_position_offsets
+    that were adjusted to maintain sub-component stage bindings.
+    """
+
+    scene: "DesignScene"
+    stage_id: UUID
+    # Stage x_position in grid units
+    old_stage_x: float
+    new_stage_x: float
+    # Stage additional_offset in grid units
+    old_additional_offset: float
+    new_additional_offset: float
+    # Register positions: dict[instance_id → (x, y)] in grid units
+    old_reg_positions: dict
+    new_reg_positions: dict
+    # Composite stage_position_offsets: dict[instance_id → offset] in grid units
+    old_composite_offsets: dict
+    new_composite_offsets: dict
+
+    def execute(self) -> None:
+        """Apply the new stage position."""
+        self._apply(
+            self.new_stage_x,
+            self.new_additional_offset,
+            self.new_reg_positions,
+            self.new_composite_offsets,
+        )
+
+    def undo(self) -> None:
+        """Restore the old stage position."""
+        self._apply(
+            self.old_stage_x,
+            self.old_additional_offset,
+            self.old_reg_positions,
+            self.old_composite_offsets,
+        )
+
+    def _apply(
+        self,
+        stage_x: float,
+        additional_offset: float,
+        reg_positions: dict,
+        composite_offsets: dict,
+    ) -> None:
+        stage = self.scene._design.get_stage_by_id(self.stage_id)
+        if stage is None:
+            return
+
+        stage.x_position = stage_x
+        stage.additional_offset = additional_offset
+
+        for inst_id_str, pos in reg_positions.items():
+            inst_id = UUID(inst_id_str) if isinstance(inst_id_str, str) else inst_id_str
+            self.scene._move_register_direct(inst_id, pos)
+
+        for inst_id_str, offset in composite_offsets.items():
+            inst_id = UUID(inst_id_str) if isinstance(inst_id_str, str) else inst_id_str
+            instance = self.scene._design.get_component_by_id(inst_id)
+            if instance:
+                instance.stage_position_offset = offset
+
+        self.scene._design.reindex_stages()
+        self.scene._rebuild_all_stages()
+        self.scene._update_register_displays()
+        self.scene._update_all_component_alignments()
+        self.scene._apply_stage_position_offsets()
+        self.scene.update_connection_positions()
+        self.scene.stages_changed.emit()
+
+    @property
+    def description(self) -> str:
+        return "Move stage"
+
+
 class UndoStack:
     """Manages undo/redo history for commands."""
 

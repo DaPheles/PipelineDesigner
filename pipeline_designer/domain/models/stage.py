@@ -23,6 +23,12 @@ class Stage(BaseModel):
         default_factory=list,
         description="IDs of registers belonging to this stage",
     )
+    # Extra X space added to accommodate sub-component spacing requirements.
+    # The stage may move left by at most this amount (down to x_position - additional_offset).
+    additional_offset: float = Field(
+        default=0.0,
+        description="Extra X offset in grid units added for sub-component spacing",
+    )
 
     def contains_x(self, x: float) -> bool:
         """Check if an x coordinate falls within this stage."""

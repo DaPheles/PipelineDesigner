@@ -88,6 +88,19 @@ class ComponentInstance(BaseModel):
     alignment_index: int = Field(
         default=0, description="Alignment slot index relative to register stages"
     )
+    # Additional X offset in grid units applied ON TOP of the base position.
+    # Tracks expansion caused by sub-component stage spacing requirements so
+    # the offset can be collapsed when the composite is removed.
+    stage_position_offset: float = Field(
+        default=0.0,
+        description="Additional X offset in grid units from stage alignment adjustments",
+    )
+    # When True, this instance is at a provisional position that hasn't been
+    # formally accepted by the user yet (shown with orange dashed border).
+    is_position_temporary: bool = Field(
+        default=False,
+        description="True while instance is at a temporary/provisional position",
+    )
 
     def get_display_name(self) -> str:
         """Get the display name for this instance."""

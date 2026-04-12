@@ -134,7 +134,7 @@ class InterfaceStageItem(QGraphicsRectItem):
         for i, port_item in enumerate(self._port_items):
             y = spacing * (i + 1)
             if self._is_input:
-                x = self.STAGE_WIDTH  # Right edge for input
+                x = self.STAGE_WIDTH # Right edge for input
             else:
                 x = 0  # Left edge for output
             port_item.setPos(x, y)
@@ -183,7 +183,7 @@ class InterfaceStageItem(QGraphicsRectItem):
         font = QFont("Arial", 8, QFont.Weight.Bold)
         painter.setFont(font)
 
-        label = "IN" if self._is_input else "OUT"
+        label = "INPUTS" if self._is_input else "OUTPUTS"
 
         # Draw vertical text
         painter.save()

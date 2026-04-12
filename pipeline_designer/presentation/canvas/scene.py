@@ -23,6 +23,7 @@ from .commands import (
     AddComponentCommand,
     AddConnectionCommand,
     MoveComponentCommand,
+    MoveStageCommand,
     RemoveComponentCommand,
     RemoveConnectionCommand,
     UndoStack,
@@ -35,6 +36,7 @@ from .items import (
     InterfaceStageItem,
     StageItem,
     TempConnectionItem,
+    TempPositionOverlayItem,
 )
 from .items.port_item import PortItem
 
@@ -95,6 +97,33 @@ class DesignScene(QGraphicsScene):
 
         # Track items with distance conflicts (made semi-transparent)
         self._conflict_items: set[UUID] = set()
+
+        # ── Stage group-move state (Priority 1 & 3) ──────────────────────────
+        # Set while the user drags an entire stage band.
+        self._moving_stage: Stage | None = None
+        self._stage_move_mouse_start: QPointF = QPointF()
+        self._stage_move_stage_start_x: float = 0.0   # grid units
+        self._stage_move_new_x: float = 0.0           # grid units (updated each tick)
+        self._stage_group_items: list[ComponentItem] = []
+        self._stage_group_original_positions: dict[UUID, tuple[float, float]] = {}
+        # When True, _on_register_moved and snap_register_x skip their logic
+        self._in_stage_group_move: bool = False
+
+        # ── Composite drag alignment state (Priority 2) ──────────────────────
+        # ID of the composite currently being dragged (if any).
+        self._dragging_composite_id: UUID | None = None
+        # Temporary overlay items shown during drag
+        self._composite_drag_overlays: list[TempPositionOverlayItem] = []
+        # Proposed stage shifts: {stage_id → delta_grid_units} — only positive
+        self._composite_proposed_shifts: dict[UUID, float] = {}
+
+        # ── Accepted temporary positions (Priority 2) ────────────────────────
+        # Overlays kept after accepting the drag (orange dashed around composites)
+        self._temp_position_overlays: dict[UUID, TempPositionOverlayItem] = {}
+
+        # ── Composite → stage bindings (Priority 3) ──────────────────────────
+        # composite_instance_id → { internal_stage_index → main_stage_id }
+        self._composite_stage_bindings: dict[UUID, dict[int, UUID]] = {}
 
         self._setup_scene()
 
@@ -478,6 +507,7 @@ class DesignScene(QGraphicsScene):
         self._output_stage = None
         self._component_bounds = None
         self._design = design
+        self._reset_alignment_state()
 
         # Create interface stages and bounds
         if self._interface_enabled:
@@ -514,6 +544,7 @@ class DesignScene(QGraphicsScene):
         self._output_stage = None
         self._component_bounds = None
         self._design = Design()
+        self._reset_alignment_state()
 
         # Create interface stages and bounds
         if self._interface_enabled:
@@ -883,24 +914,6 @@ class DesignScene(QGraphicsScene):
         # Update connections
         self.update_connection_positions()
 
-    def _update_stretched_ports(self, item: "ComponentItem") -> None:
-        """Update port positions for a stretched component.
-
-        Args:
-            item: The component graphics item.
-        """
-        for port_name, port_item in item._port_items.items():
-            port = port_item._port
-            if port.position:
-                # Scale x position by stretch factor
-                x_px = self._grid.to_pixels(port.position[0])
-                y_px = self._grid.to_pixels(port.position[1])
-                port_item.setPos(x_px, y_px)
-            elif port.direction.value == "out":
-                # Output ports move with the right edge
-                rect = item.rect()
-                port_item.setPos(rect.width(), port_item.pos().y())
-
     def _ensure_stages_for_composite(
         self,
         composite_design: Design,
@@ -1001,6 +1014,8 @@ class DesignScene(QGraphicsScene):
     def _create_stage_item(self, stage: Stage) -> StageItem:
         """Create a graphics item for a stage."""
         item = StageItem(stage, view_height=10000.0, grid=self._grid)
+        # Wire up stage group-move initiation
+        item.on_stage_click = self._on_stage_click
         self.addItem(item)
         self._stage_items[stage.id] = item
         return item
@@ -1106,9 +1121,24 @@ class DesignScene(QGraphicsScene):
             item.snap_register_x = self.snap_register_x
             item.check_distance_conflicts = self._check_distance_conflicts
             item.clear_distance_conflicts = self._clear_distance_conflicts
+        elif instance.is_composite:
+            # Composites snap TO stages (their internal stages align with main
+            # design stages) and get a drag-update callback for visual feedback.
+            # They must NOT get avoid_stage_overlap – that fights alignment.
+            internal_offsets = self._get_composite_internal_offsets_for(instance)
+            item.snap_composite_x = lambda x, off=internal_offsets: (
+                self._snap_composite_x(x, off)
+            )
+            item.on_composite_drag_update = self._on_composite_drag_update
         else:
-            # Non-registers should avoid overlapping with stages
+            # Plain operation components: no hard position constraint.
+            # invalid placements are shown visually (see _on_composite_drag_update
+            # pattern), not enforced by blocking movement.
             item.avoid_stage_overlap = self._avoid_stage_overlap
+
+        # Restore temporary visual state if the instance was marked temporary
+        if instance.is_position_temporary:
+            item.set_temporary(True)
 
         # Wire up port callbacks for connections
         self._wire_port_callbacks(item)
@@ -1428,7 +1458,13 @@ class DesignScene(QGraphicsScene):
         self._update_component_bounds()
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse move for connection dragging."""
+        """Handle mouse move for connection dragging and stage group-moves."""
+        # ── Stage group-move takes priority ──────────────────────────────────
+        if self._moving_stage is not None:
+            self._update_stage_group_move(event.scenePos())
+            self.update_connection_positions()
+            return  # Do not deliver to items – prevents accidental other drags
+
         super().mouseMoveEvent(event)
 
         # Update temporary connection line
@@ -1477,7 +1513,13 @@ class DesignScene(QGraphicsScene):
         self.update_connection_positions()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse release for connection creation."""
+        """Handle mouse release for connection creation and stage group-moves."""
+        # ── Commit stage group-move ───────────────────────────────────────────
+        if self._moving_stage is not None:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._commit_stage_group_move()
+            return
+
         if self._temp_connection:
             items = self.items(event.scenePos())
 
@@ -1533,6 +1575,11 @@ class DesignScene(QGraphicsScene):
             instance: The register instance that was moved.
             old_x: Previous x position in grid units.
         """
+        # During a stage group-move the scene handles stage reassignment in bulk
+        # at commit time, so individual callbacks must be suppressed here.
+        if self._in_stage_group_move:
+            return
+
         # Position is now in grid units
         new_x_grid = instance.position[0]
 
@@ -1598,9 +1645,18 @@ class DesignScene(QGraphicsScene):
                     stage.register_ids.remove(component_id)
                     break
 
+        # For composites: release stage bindings and collapse additional_offset
+        if instance.is_composite:
+            self._release_composite_stage_bindings(component_id)
+
         self.removeItem(item)
         del self._component_items[component_id]
         self._design.remove_component(component_id)
+
+        # Remove any temporary overlay for this instance
+        overlay = self._temp_position_overlays.pop(component_id, None)
+        if overlay and overlay.scene():
+            self.removeItem(overlay)
 
         if is_register:
             self._design.remove_empty_stages()
@@ -1739,12 +1795,18 @@ class DesignScene(QGraphicsScene):
     def snap_register_x(self, x: float) -> float:
         """Snap x coordinate for a register (stage-aware).
 
+        During a stage group-move the normal stage-snapping is bypassed so
+        registers can be repositioned freely to their new group position.
+
         Args:
             x: X position in pixels.
 
         Returns:
             Snapped x position in pixels.
         """
+        if self._in_stage_group_move:
+            return self._grid.snap_to_grid(x) if self._snap_to_grid else x
+
         x_grid = self._grid.to_grid_units(x)
         stage = self._design.get_stage_at_x(x_grid)
         if stage:
@@ -1752,6 +1814,50 @@ class DesignScene(QGraphicsScene):
         if self._snap_to_grid:
             return self._grid.snap_to_grid(x)
         return x
+
+    def _get_composite_internal_offsets_for(
+        self, instance: ComponentInstance
+    ) -> list[float]:
+        """Return the internal stage offsets (pixels from left edge) for *instance*.
+
+        Returns an empty list when the composite design is unavailable.
+        """
+        if not self._library_loader:
+            return []
+        composite_design = self._library_loader.get_composite_design(
+            instance.definition_ref
+        )
+        if not composite_design:
+            return []
+        return self._get_composite_internal_stage_offsets(composite_design)
+
+    def _snap_composite_x(self, x_px: float, internal_offsets: list[float]) -> float:
+        """Snap a composite's left-edge pixel x so its first internal stage
+        aligns with the nearest main-design stage.
+
+        Falls back to plain grid snap when no stage is close enough.
+
+        Args:
+            x_px:             Proposed left-edge position in pixels.
+            internal_offsets: Pixel offsets of each internal stage from the
+                              composite's left edge (from
+                              _get_composite_internal_stage_offsets).
+
+        Returns:
+            Adjusted x position in pixels.
+        """
+        if not internal_offsets:
+            return self._grid.snap_to_grid(x_px) if self._snap_to_grid else x_px
+
+        first_world_x = x_px + internal_offsets[0]
+        nearest = self._find_nearest_stage_wide(first_world_x)
+        if nearest is not None:
+            # Snap the composite so its first internal stage sits exactly on
+            # the nearest main stage.
+            stage_x_px = self._grid.to_pixels(nearest.x_position)
+            return self._grid.snap_to_grid(stage_x_px - internal_offsets[0])
+
+        return self._grid.snap_to_grid(x_px) if self._snap_to_grid else x_px
 
     def _check_distance_conflicts(self, register_x: float, aligned_stage_index: int | None) -> None:
         """Check for distance conflicts during register/stage movement.
@@ -1904,6 +2010,12 @@ class DesignScene(QGraphicsScene):
 
         # Only create command if position actually changed
         if old_pos != new_pos:
+            instance = item.get_instance()
+
+            # For composites: apply proposed stage shifts before recording
+            if instance.is_composite and component_id == self._dragging_composite_id:
+                self._commit_composite_drag_alignment(instance)
+
             command = MoveComponentCommand(
                 scene=self,
                 component_id=component_id,
@@ -1915,5 +2027,562 @@ class DesignScene(QGraphicsScene):
             self._undo_stack._redo_stack.clear()
 
             # Update alignment index for the moved component
-            instance = item.get_instance()
             self._update_component_alignment(instance)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Stage group-move  (Priority 1 & 3)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_stage_click(self, stage: Stage, scene_pos: QPointF) -> None:
+        """Called by StageItem when the user presses on a stage band.
+
+        Initiates a group-move of every register in that stage.
+        """
+        self._moving_stage = stage
+        self._stage_move_mouse_start = scene_pos
+        self._stage_move_stage_start_x = stage.x_position
+        self._stage_move_new_x = stage.x_position
+
+        # Gather all register ComponentItems that belong to this stage
+        self._stage_group_items = []
+        self._stage_group_original_positions = {}
+        for reg_id in stage.register_ids:
+            item = self._component_items.get(reg_id)
+            if item is not None:
+                self._stage_group_items.append(item)
+                self._stage_group_original_positions[reg_id] = item.get_instance().position
+
+        if not self._stage_group_items:
+            # Nothing to move – clear immediately
+            self._moving_stage = None
+            return
+
+        # Suppress per-register callbacks during the group move
+        self._in_stage_group_move = True
+
+        # Visual feedback: mark stage as being moved
+        stage_item = self._stage_items.get(stage.id)
+        if stage_item:
+            stage_item.set_being_moved(True)
+
+        # Disable movement on all other non-group items so nothing else drifts
+        self._set_non_group_items_movable(False)
+
+    def _update_stage_group_move(self, scene_pos: QPointF) -> None:
+        """Update register positions during a stage group-drag.
+
+        Also enforces the left-side constraint from sub-component bindings
+        and shows the red invalid-overlap indicator when needed.
+        """
+        if self._moving_stage is None:
+            return
+
+        stage = self._moving_stage
+        delta_px = scene_pos.x() - self._stage_move_mouse_start.x()
+        delta_grid = self._grid.to_grid_units(delta_px)
+        proposed_x = self._grid.snap_to_grid_units(
+            self._stage_move_stage_start_x + delta_grid
+        )
+
+        # ── Priority 3: left constraint ──────────────────────────────────────
+        left_bound = self._get_stage_left_bound(stage)
+        proposed_x = max(proposed_x, left_bound)
+
+        # ── Auto-snap to perfect alignment with bound composites ─────────────
+        snap_x = self._get_stage_snap_x(stage, proposed_x)
+        if snap_x is not None:
+            proposed_x = snap_x
+
+        self._stage_move_new_x = proposed_x
+        delta_applied = proposed_x - self._stage_move_stage_start_x
+
+        # Move each register item programmatically (no callbacks)
+        for item in self._stage_group_items:
+            orig = self._stage_group_original_positions[item.get_instance().id]
+            new_x_grid = orig[0] + delta_applied
+            new_x_px = self._grid.to_pixels(new_x_grid)
+            new_y_px = self._grid.to_pixels(orig[1])
+            item.set_position_no_callbacks(new_x_px, new_y_px)
+
+        # ── Update the ghost stage position for overlap check ────────────────
+        # (move the actual model x temporarily so the stage item repositions)
+        stage.x_position = proposed_x
+        stage_item = self._stage_items.get(stage.id)
+        if stage_item:
+            stage_item.update_stage(stage)
+
+        # ── Overlap detection ────────────────────────────────────────────────
+        is_invalid = self._check_stage_group_overlaps(stage, proposed_x)
+        if stage_item:
+            stage_item.set_invalid_overlap(is_invalid)
+
+    def _commit_stage_group_move(self) -> None:
+        """Commit the current stage group-move and record an undo command."""
+        if self._moving_stage is None:
+            return
+
+        stage = self._moving_stage
+        new_x = self._stage_move_new_x
+        old_x = self._stage_move_stage_start_x
+        delta_grid = new_x - old_x
+
+        # Build new register positions
+        new_reg_positions: dict[UUID, tuple[float, float]] = {}
+        for item in self._stage_group_items:
+            inst = item.get_instance()
+            orig = self._stage_group_original_positions[inst.id]
+            new_reg_positions[inst.id] = (orig[0] + delta_grid, orig[1])
+
+        # Composite offsets: adjust stage_position_offset for bound composites
+        old_composite_offsets: dict[UUID, float] = {}
+        new_composite_offsets: dict[UUID, float] = {}
+        for comp_id, binding in self._composite_stage_bindings.items():
+            if stage.id in binding.values():
+                inst = self._design.get_component_by_id(comp_id)
+                if inst:
+                    old_composite_offsets[comp_id] = inst.stage_position_offset
+                    new_composite_offsets[comp_id] = inst.stage_position_offset + delta_grid
+
+        # Record undo command (state already applied visually)
+        command = MoveStageCommand(
+            scene=self,
+            stage_id=stage.id,
+            old_stage_x=old_x,
+            new_stage_x=new_x,
+            old_additional_offset=stage.additional_offset,
+            new_additional_offset=max(0.0, stage.additional_offset + delta_grid),
+            old_reg_positions={str(k): v for k, v in self._stage_group_original_positions.items()},
+            new_reg_positions={str(k): v for k, v in new_reg_positions.items()},
+            old_composite_offsets={str(k): v for k, v in old_composite_offsets.items()},
+            new_composite_offsets={str(k): v for k, v in new_composite_offsets.items()},
+        )
+        self._undo_stack._undo_stack.append(command)
+        self._undo_stack._redo_stack.clear()
+
+        # Apply model updates
+        stage.x_position = new_x
+        stage.additional_offset = max(0.0, stage.additional_offset + delta_grid)
+
+        for inst_id, pos in new_reg_positions.items():
+            inst = self._design.get_component_by_id(inst_id)
+            if inst:
+                inst.position = pos
+
+        for inst_id, offset in new_composite_offsets.items():
+            inst = self._design.get_component_by_id(inst_id)
+            if inst:
+                inst.stage_position_offset = offset
+
+        # Rebuild and update
+        self._design.reindex_stages()
+        self._rebuild_all_stages()
+        self._update_register_displays()
+        self._update_all_component_alignments()
+        self._apply_stage_position_offsets()
+        self.update_connection_positions()
+        self.stages_changed.emit()
+
+        self._end_stage_group_move()
+
+    def _end_stage_group_move(self) -> None:
+        """Clean up after a stage group-move (commit or cancel)."""
+        stage = self._moving_stage
+        if stage:
+            stage_item = self._stage_items.get(stage.id)
+            if stage_item:
+                stage_item.set_being_moved(False)
+                stage_item.set_invalid_overlap(False)
+
+        self._moving_stage = None
+        self._stage_group_items = []
+        self._stage_group_original_positions = {}
+        self._in_stage_group_move = False
+        self._set_non_group_items_movable(True)
+
+    def _get_stage_left_bound(self, stage: Stage) -> float:
+        """Return the minimum x_position (grid units) for *stage*.
+
+        The constraint only applies when at least one composite is bound to this
+        stage.  In that case the stage cannot move further left than the position
+        where its ``additional_offset`` would reach zero (i.e. where the
+        composite's internal stage would land exactly on the main stage without
+        any extra space).
+
+        When no composite is bound the stage is free to move left, so we return
+        negative infinity (no design-imposed constraint).
+        """
+        has_binding = any(
+            stage.id in binding.values()
+            for binding in self._composite_stage_bindings.values()
+        )
+        if not has_binding:
+            return float("-inf")
+        # Composite bound: can slide left until additional_offset reaches 0
+        return stage.x_position - stage.additional_offset
+
+    def _get_stage_snap_x(self, stage: Stage, proposed_x: float) -> float | None:
+        """Return the snap x (grid units) when *proposed_x* is near a natural
+        alignment point for a bound composite, otherwise None.
+
+        The 'natural' position is where additional_offset would become exactly 0.
+        """
+        has_binding = any(
+            stage.id in binding.values()
+            for binding in self._composite_stage_bindings.values()
+        )
+        if not has_binding:
+            return None
+        snap_threshold = 1.5  # grid units
+        natural_x = stage.x_position - stage.additional_offset
+        if abs(proposed_x - natural_x) <= snap_threshold:
+            return natural_x
+        return None
+
+    def _check_stage_group_overlaps(self, moving_stage: Stage, proposed_x: float) -> bool:
+        """Return True if *moving_stage* at *proposed_x* overlaps any other stage."""
+        width = moving_stage.width
+        for other in self._design.stages:
+            if other.id == moving_stage.id:
+                continue
+            if other.overlaps(proposed_x, width):
+                return True
+        return False
+
+    def _set_non_group_items_movable(self, movable: bool) -> None:
+        """Enable/disable ItemIsMovable on all items not in the current group."""
+        group_ids = {item.get_instance().id for item in self._stage_group_items}
+        for comp_id, item in self._component_items.items():
+            if comp_id not in group_ids:
+                item.setFlag(
+                    item.GraphicsItemFlag.ItemIsMovable, movable
+                )
+
+    def _move_register_direct(self, inst_id: UUID, pos: tuple[float, float]) -> None:
+        """Move a register item directly (used by MoveStageCommand undo/redo)."""
+        item = self._component_items.get(inst_id)
+        inst = self._design.get_component_by_id(inst_id)
+        if item and inst:
+            inst.position = pos
+            x_px, y_px = self._grid.pos_to_pixels(pos)
+            item.set_position_no_callbacks(x_px, y_px)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Composite drag alignment  (Priority 2)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_composite_drag_update(
+        self, instance: ComponentInstance, new_pos: QPointF
+    ) -> None:
+        """Called each pixel-move while dragging a composite component.
+
+        - Computes proposed stage shifts for multi-stage spacing conflicts.
+        - Shows an overlay that reflects whether the current position is
+          aligned (orange border + label) or not (red border + label).
+        - The overlay is always shown while dragging so the user has continuous
+          visual feedback.
+        """
+        self._dragging_composite_id = instance.id
+        self._clear_composite_drag_previews()
+        self._composite_proposed_shifts.clear()
+
+        comp_x_px = new_pos.x()
+
+        # Compute internal stage offsets (needed for both snap and feedback)
+        internal_offsets = self._get_composite_internal_offsets_for(instance)
+
+        item = self._component_items.get(instance.id)
+        if item is None:
+            return
+
+        # ── Determine alignment status ───────────────────────────────────────
+        is_aligned = False
+        aligned_label = "Not aligned to any stage"
+        nearest: Stage | None = None
+
+        if internal_offsets and self._design.stages:
+            first_world_x = comp_x_px + internal_offsets[0]
+            nearest = self._find_nearest_stage_wide(first_world_x)
+            if nearest is not None:
+                is_aligned = True
+                aligned_label = f"Aligned → Stage {nearest.index}"
+
+                # For multi-stage composites check if internal spacing forces
+                # later stages to shift right.
+                if len(internal_offsets) > 1:
+                    by_index = {
+                        s.index: s
+                        for s in sorted(self._design.stages, key=lambda s: s.x_position)
+                    }
+                    for i, int_off in enumerate(internal_offsets[1:], start=1):
+                        target_idx = nearest.index + i
+                        main_st = by_index.get(target_idx)
+                        if main_st is None:
+                            continue
+                        internal_world_x = comp_x_px + int_off
+                        main_x_px = self._grid.to_pixels(main_st.x_position)
+                        needed_shift_px = internal_world_x - main_x_px
+                        if needed_shift_px > self._grid.size:
+                            shift_grid = self._grid.to_grid_units(needed_shift_px)
+                            self._composite_proposed_shifts[main_st.id] = shift_grid
+                            aligned_label += " (stages will shift →)"
+
+        elif not self._design.stages:
+            # No stages yet – composite will create them on drop
+            is_aligned = True
+            aligned_label = "Will create stages on drop"
+
+        # ── Show overlay ─────────────────────────────────────────────────────
+        rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+        overlay = TempPositionOverlayItem(
+            rect,
+            label=aligned_label,
+            invalid=not is_aligned,
+        )
+        self.addItem(overlay)
+        self._composite_drag_overlays.append(overlay)
+
+    def _commit_composite_drag_alignment(self, instance: ComponentInstance) -> None:
+        """Apply proposed stage shifts after a composite is dropped.
+
+        - Shifts main design stages right (never left) to fit the composite.
+        - Marks displaced non-register elements as temporary.
+        - Stores the stage binding for constraint calculations.
+        - Clears drag previews and shows accepted-temporary overlays.
+        """
+        if not self._library_loader:
+            self._clear_composite_drag_previews()
+            self._dragging_composite_id = None
+            return
+
+        composite_design = self._library_loader.get_composite_design(
+            instance.definition_ref
+        )
+        if not composite_design:
+            self._clear_composite_drag_previews()
+            self._dragging_composite_id = None
+            return
+
+        # Apply each proposed shift
+        for stage_id, shift_grid in self._composite_proposed_shifts.items():
+            if shift_grid > 0:
+                self._shift_stage_right_permanent(stage_id, shift_grid, instance.id)
+
+        # Build and store the binding: internal stage idx → main stage id
+        internal_offsets = self._get_composite_internal_stage_offsets(composite_design)
+        binding: dict[int, UUID] = {}
+        item = self._component_items.get(instance.id)
+        if item and internal_offsets:
+            comp_x_px = item.pos().x()
+            for i, off in enumerate(internal_offsets):
+                world_x = comp_x_px + off
+                nearest = self._find_nearest_stage_wide(world_x)
+                if nearest:
+                    binding[i] = nearest.id
+        if binding:
+            self._composite_stage_bindings[instance.id] = binding
+
+        # Show accepted-temporary overlay on the composite itself
+        self._add_temp_position_overlay(instance.id)
+
+        # Clear drag-time previews
+        self._clear_composite_drag_previews()
+        self._composite_proposed_shifts.clear()
+        self._dragging_composite_id = None
+
+        self._apply_stage_position_offsets()
+        self.update_connection_positions()
+
+    def _shift_stage_right_permanent(
+        self, stage_id: UUID, shift_grid: float, source_composite_id: UUID
+    ) -> None:
+        """Shift a stage and all elements to its right by *shift_grid* units.
+
+        Updates ``stage.additional_offset``, displaces non-register components
+        sitting to the right of the stage, and marks them temporary.
+        """
+        stage = self._design.get_stage_by_id(stage_id)
+        if stage is None or shift_grid <= 0:
+            return
+
+        stage.x_position += shift_grid
+        stage.additional_offset += shift_grid
+
+        # Shift subsequent stages and non-register components
+        from_x_grid = stage.x_position - shift_grid  # original x
+        for other_stage in self._design.stages:
+            if other_stage.id != stage_id and other_stage.x_position > from_x_grid:
+                other_stage.x_position += shift_grid
+                other_stage.additional_offset += shift_grid
+
+        # Non-register instances to the right of the original stage position
+        for comp_id, comp_item in self._component_items.items():
+            inst = comp_item.get_instance()
+            if inst.definition_ref == "Register":
+                continue
+            if inst.position[0] > from_x_grid:
+                inst.stage_position_offset += shift_grid
+                inst.is_position_temporary = True
+                comp_item.set_temporary(True)
+
+        self._design.reindex_stages()
+        self._rebuild_all_stages()
+
+    def _release_composite_stage_bindings(self, composite_id: UUID) -> None:
+        """Release stage bindings when a composite is removed.
+
+        Checks each bound stage and, if no other composite still binds it,
+        collapses ``additional_offset`` to zero and repositions the design.
+        """
+        binding = self._composite_stage_bindings.pop(composite_id, None)
+        if not binding:
+            return
+
+        for stage_id in binding.values():
+            stage = self._design.get_stage_by_id(stage_id)
+            if stage is None or stage.additional_offset <= 0:
+                continue
+
+            # Check if any remaining composite still binds this stage
+            still_needed = any(
+                stage_id in b.values()
+                for other_id, b in self._composite_stage_bindings.items()
+                if other_id != composite_id
+            )
+            if still_needed:
+                continue
+
+            # Collapse the extra offset: move stage left by additional_offset
+            collapse = stage.additional_offset
+            stage.x_position -= collapse
+            stage.additional_offset = 0.0
+
+            # Adjust non-register instances that carried this offset
+            for comp_id, comp_item in self._component_items.items():
+                inst = comp_item.get_instance()
+                if inst.definition_ref == "Register":
+                    continue
+                if inst.stage_position_offset > 0:
+                    inst.stage_position_offset = max(
+                        0.0, inst.stage_position_offset - collapse
+                    )
+                    if inst.stage_position_offset == 0.0:
+                        inst.is_position_temporary = False
+                        comp_item.set_temporary(False)
+
+        self._design.reindex_stages()
+        self._rebuild_all_stages()
+        self._apply_stage_position_offsets()
+        self.update_connection_positions()
+
+    def _clear_composite_drag_previews(self) -> None:
+        """Remove all temporary overlay items shown during composite drag."""
+        for overlay in self._composite_drag_overlays:
+            if overlay.scene():
+                self.removeItem(overlay)
+        self._composite_drag_overlays.clear()
+
+    def _find_nearest_stage_wide(self, x_px: float) -> Stage | None:
+        """Find the nearest stage within a wider snap threshold (used during drag).
+
+        Args:
+            x_px: X position in pixels.
+
+        Returns:
+            Nearest Stage within 8 grid units, or None.
+        """
+        if not self._design.stages:
+            return None
+        threshold = self._grid.to_pixels(8)
+        nearest = None
+        min_dist = float("inf")
+        for stage in self._design.stages:
+            dist = abs(self._grid.to_pixels(stage.x_position) - x_px)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = stage
+        return nearest if min_dist <= threshold else None
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Temporary-position helpers  (Priority 2 & 3)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _apply_stage_position_offsets(self) -> None:
+        """Re-render every non-register instance using its effective position.
+
+        Effective X = instance.position[0] + instance.stage_position_offset
+        """
+        for comp_id, item in self._component_items.items():
+            inst = item.get_instance()
+            if inst.definition_ref == "Register":
+                continue
+            if inst.stage_position_offset == 0.0:
+                continue
+            eff_x = inst.position[0] + inst.stage_position_offset
+            x_px = self._grid.to_pixels(eff_x)
+            y_px = self._grid.to_pixels(inst.position[1])
+            item.set_position_no_callbacks(x_px, y_px)
+
+    def _add_temp_position_overlay(self, component_id: UUID) -> None:
+        """Add (or refresh) an accepted-temporary overlay around a component."""
+        item = self._component_items.get(component_id)
+        if item is None:
+            return
+        # Remove old overlay if any
+        old = self._temp_position_overlays.pop(component_id, None)
+        if old and old.scene():
+            self.removeItem(old)
+        rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+        overlay = TempPositionOverlayItem(rect, "Temporary – accept to confirm")
+        self.addItem(overlay)
+        self._temp_position_overlays[component_id] = overlay
+
+    def finalize_temporary_positions(self) -> None:
+        """Accept all provisional positions, clearing the temporary visual state.
+
+        Call this from a toolbar button or context-menu action after the user
+        is satisfied with the current layout.
+        """
+        for comp_id, overlay in list(self._temp_position_overlays.items()):
+            if overlay.scene():
+                self.removeItem(overlay)
+            item = self._component_items.get(comp_id)
+            if item:
+                inst = item.get_instance()
+                inst.is_position_temporary = False
+                # Absorb the offset into the base position so the model is clean
+                if inst.stage_position_offset != 0.0:
+                    inst.position = (
+                        inst.position[0] + inst.stage_position_offset,
+                        inst.position[1],
+                    )
+                    inst.stage_position_offset = 0.0
+                item.set_temporary(False)
+        self._temp_position_overlays.clear()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Shared reset helper
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _reset_alignment_state(self) -> None:
+        """Clear all alignment-related runtime state (used on design load/new)."""
+        self._moving_stage = None
+        self._stage_move_mouse_start = QPointF()
+        self._stage_move_stage_start_x = 0.0
+        self._stage_move_new_x = 0.0
+        self._stage_group_items = []
+        self._stage_group_original_positions = {}
+        self._in_stage_group_move = False
+
+        for overlay in self._composite_drag_overlays:
+            if overlay.scene():
+                self.removeItem(overlay)
+        self._composite_drag_overlays = []
+
+        for overlay in self._temp_position_overlays.values():
+            if overlay.scene():
+                self.removeItem(overlay)
+        self._temp_position_overlays = {}
+
+        self._composite_proposed_shifts = {}
+        self._composite_stage_bindings = {}
+        self._dragging_composite_id = None

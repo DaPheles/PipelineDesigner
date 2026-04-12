@@ -27,7 +27,6 @@ class InterfacePortItem(QGraphicsEllipseItem):
     # Larger radius for interface ports
     PORT_RADIUS = 12.0
     LABEL_OFFSET = 20.0
-    POS_OFFSET = 20.0
 
     def __init__(
         self,
@@ -187,15 +186,6 @@ class InterfacePortItem(QGraphicsEllipseItem):
 
         label = self._interface_port.name
         if self._interface_port.direction == InterfaceDirection.INPUT:
-            # Label to the right of the port
-            label_rect = QRectF(
-                self.PORT_RADIUS + 5,
-                -10,
-                100,
-                20,
-            )
-            painter.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
-        else:
             # Label to the left of the port
             label_rect = QRectF(
                 -self.PORT_RADIUS - 105,
@@ -204,6 +194,15 @@ class InterfacePortItem(QGraphicsEllipseItem):
                 20,
             )
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+        else:
+            # Label to the right of the port
+            label_rect = QRectF(
+                self.PORT_RADIUS + 5,
+                -10,
+                100,
+                20,
+            )
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle mouse press for connection creation."""
