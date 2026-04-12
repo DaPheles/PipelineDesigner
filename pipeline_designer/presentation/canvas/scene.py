@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from PySide6.QtCore import QPointF, QRectF, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
@@ -496,6 +496,10 @@ class DesignScene(QGraphicsScene):
 
     def set_design(self, design: Design) -> None:
         """Set a new design, clearing existing items."""
+        # Reset alignment state FIRST while Qt objects are still alive.
+        # self.clear() below will destroy all C++ wrappers; calling .scene()
+        # or removeItem() on dead wrappers raises RuntimeError.
+        self._reset_alignment_state()
         self.clear()
         self._component_items.clear()
         self._stage_items.clear()
@@ -507,7 +511,6 @@ class DesignScene(QGraphicsScene):
         self._output_stage = None
         self._component_bounds = None
         self._design = design
-        self._reset_alignment_state()
 
         # Create interface stages and bounds
         if self._interface_enabled:
@@ -533,6 +536,8 @@ class DesignScene(QGraphicsScene):
 
     def new_design(self) -> None:
         """Create a new empty design."""
+        # Same ordering requirement as set_design: reset before clear.
+        self._reset_alignment_state()
         self.clear()
         self._component_items.clear()
         self._stage_items.clear()
@@ -544,7 +549,6 @@ class DesignScene(QGraphicsScene):
         self._output_stage = None
         self._component_bounds = None
         self._design = Design()
-        self._reset_alignment_state()
 
         # Create interface stages and bounds
         if self._interface_enabled:
@@ -2476,9 +2480,7 @@ class DesignScene(QGraphicsScene):
 
     def _clear_composite_drag_previews(self) -> None:
         """Remove all temporary overlay items shown during composite drag."""
-        for overlay in self._composite_drag_overlays:
-            if overlay.scene():
-                self.removeItem(overlay)
+        self._remove_overlays_safe(self._composite_drag_overlays)
         self._composite_drag_overlays.clear()
 
     def _find_nearest_stage_wide(self, x_px: float) -> Stage | None:
@@ -2529,8 +2531,8 @@ class DesignScene(QGraphicsScene):
             return
         # Remove old overlay if any
         old = self._temp_position_overlays.pop(component_id, None)
-        if old and old.scene():
-            self.removeItem(old)
+        if old:
+            self._remove_overlays_safe([old])
         rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
         overlay = TempPositionOverlayItem(rect, "Temporary – accept to confirm")
         self.addItem(overlay)
@@ -2543,8 +2545,7 @@ class DesignScene(QGraphicsScene):
         is satisfied with the current layout.
         """
         for comp_id, overlay in list(self._temp_position_overlays.items()):
-            if overlay.scene():
-                self.removeItem(overlay)
+            self._remove_overlays_safe([overlay])
             item = self._component_items.get(comp_id)
             if item:
                 inst = item.get_instance()
@@ -2564,7 +2565,11 @@ class DesignScene(QGraphicsScene):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _reset_alignment_state(self) -> None:
-        """Clear all alignment-related runtime state (used on design load/new)."""
+        """Clear all alignment-related runtime state (used on design load/new).
+
+        Must be called BEFORE QGraphicsScene.clear() so that the Qt C++ objects
+        backing the overlay items are still alive when we call removeItem / scene().
+        """
         self._moving_stage = None
         self._stage_move_mouse_start = QPointF()
         self._stage_move_stage_start_x = 0.0
@@ -2573,16 +2578,22 @@ class DesignScene(QGraphicsScene):
         self._stage_group_original_positions = {}
         self._in_stage_group_move = False
 
-        for overlay in self._composite_drag_overlays:
-            if overlay.scene():
-                self.removeItem(overlay)
+        self._remove_overlays_safe(self._composite_drag_overlays)
         self._composite_drag_overlays = []
 
-        for overlay in self._temp_position_overlays.values():
-            if overlay.scene():
-                self.removeItem(overlay)
+        self._remove_overlays_safe(list(self._temp_position_overlays.values()))
         self._temp_position_overlays = {}
 
         self._composite_proposed_shifts = {}
         self._composite_stage_bindings = {}
         self._dragging_composite_id = None
+
+    def _remove_overlays_safe(self, overlays: list) -> None:
+        """Remove overlay items from the scene, tolerating already-deleted objects."""
+        for overlay in overlays:
+            try:
+                if overlay.scene() is not None:
+                    self.removeItem(overlay)
+            except RuntimeError:
+                # C++ object was already deleted (e.g. after scene.clear()) – ignore.
+                pass
