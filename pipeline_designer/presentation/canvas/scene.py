@@ -116,6 +116,8 @@ class DesignScene(QGraphicsScene):
         self._composite_drag_overlays: list[TempPositionOverlayItem] = []
         # Proposed stage shifts: {stage_id → delta_grid_units} — only positive
         self._composite_proposed_shifts: dict[UUID, float] = {}
+        # Whether the last composite drag position was aligned (used on drop)
+        self._last_drag_was_aligned: bool = True
 
         # ── Accepted temporary positions (Priority 2) ────────────────────────
         # Overlays kept after accepting the drag (orange dashed around composites)
@@ -2335,6 +2337,9 @@ class DesignScene(QGraphicsScene):
             is_aligned = True
             aligned_label = "Will create stages on drop"
 
+        self._last_drag_was_aligned = is_aligned
+        item.set_invalid(not is_aligned)
+
         # ── Show overlay ─────────────────────────────────────────────────────
         rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
         overlay = TempPositionOverlayItem(
@@ -2387,6 +2392,11 @@ class DesignScene(QGraphicsScene):
 
         # Show accepted-temporary overlay on the composite itself
         self._add_temp_position_overlay(instance.id)
+
+        # Clear the item's own invalid border — the overlay now conveys the state
+        comp_item = self._component_items.get(instance.id)
+        if comp_item:
+            comp_item.set_invalid(False)
 
         # Clear drag-time previews
         self._clear_composite_drag_previews()
@@ -2534,7 +2544,14 @@ class DesignScene(QGraphicsScene):
         if old:
             self._remove_overlays_safe([old])
         rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
-        overlay = TempPositionOverlayItem(rect, "Temporary – accept to confirm")
+        if self._last_drag_was_aligned:
+            overlay = TempPositionOverlayItem(rect, "")
+        else:
+            overlay = TempPositionOverlayItem(
+                rect,
+                "Invalid location – correct it for consistency!",
+                invalid=True,
+            )
         self.addItem(overlay)
         self._temp_position_overlays[component_id] = overlay
 
@@ -2587,6 +2604,7 @@ class DesignScene(QGraphicsScene):
         self._composite_proposed_shifts = {}
         self._composite_stage_bindings = {}
         self._dragging_composite_id = None
+        self._last_drag_was_aligned = True
 
     def _remove_overlays_safe(self, overlays: list) -> None:
         """Remove overlay items from the scene, tolerating already-deleted objects."""

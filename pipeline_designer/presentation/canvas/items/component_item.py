@@ -32,7 +32,7 @@ class ComponentItem(QGraphicsRectItem):
 
     CORNER_RADIUS = 8.0
     SELECTION_PADDING = 4.0
-    HEADER_HEIGHT = 24.0
+    HEADER_HEIGHT = 20.0  # used for non-composite components
 
     def __init__(
         self,
@@ -98,6 +98,8 @@ class ComponentItem(QGraphicsRectItem):
 
         # Internal state flags
         self._is_temporary: bool = False       # orange dashed border when True
+        self._is_invalid: bool = False         # red dashed border when True
+        self._title_override: str | None = None  # shown instead of component name when set
         self._suppress_callbacks: bool = False  # set True during programmatic moves
 
         self._setup_item()
@@ -129,6 +131,10 @@ class ComponentItem(QGraphicsRectItem):
         if self.isSelected():
             pen = QPen(QColor("#ffffff"))
             pen.setWidth(3)
+        elif self._is_invalid:
+            pen = QPen(QColor("#ff4444"))
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.DashLine)
         elif self._is_temporary:
             pen = QPen(QColor("#ff8800"))
             pen.setWidth(2)
@@ -140,27 +146,118 @@ class ComponentItem(QGraphicsRectItem):
         self.setPen(pen)
         self.setBrush(QBrush(self._base_color))
 
+    def _composite_header_h(self) -> float:
+        """Header height for composite components: 1 grid unit."""
+        return float(self._grid.size)
+
+    def _composite_port_zone_w(self) -> float:
+        """Port zone width for composite components: 1 grid unit."""
+        return float(self._grid.size)
+
+    def _compute_composite_y_offset(self) -> float:
+        """Compute the y_offset used to vertically center internal content.
+
+        Must mirror the formula in CompositeViewItem._create_internal_visualization
+        so that port positions computed here land on the same pixels as the
+        internal connection endpoints drawn by the view.
+
+        The y_offset transforms design-coordinate y → view-local y:
+            view_y = grid.to_pixels(design_y) + y_offset
+        """
+        if not self._composite_design or not self._composite_design.components:
+            return 0.0
+
+        rect = self.rect()
+        header_h = self._composite_header_h()
+        available_h = rect.height() - header_h
+
+        min_y = float("inf")
+        max_y = float("-inf")
+        for comp in self._composite_design.components:
+            y = self._grid.to_pixels(comp.position[1])
+            definition = self._library.get(comp.definition_ref)
+            if definition:
+                _, h = definition.visual.get_pixel_size(self._grid)
+            else:
+                h = self._grid.to_pixels(3)
+            min_y = min(min_y, y)
+            max_y = max(max_y, y + h)
+
+        content_h = max_y - min_y
+        return (available_h - content_h) / 2 - min_y
+
     def _create_ports(self) -> None:
         """Create port items for all ports.
 
         Port positions are specified in grid units and converted to pixels.
         Ports without explicit positions are auto-placed on left/right edges.
+
+        For composite components the external port circles are always placed:
+          - x: at the center of the port zone (grid.size / 2 from the edge)
+          - y: header_h + to_pixels(design_y) + y_offset, matching the endpoint
+            that CompositeViewItem draws for the same interface port connection.
+
+        NOTE: the library loader always sets explicit port.position values on
+        composite ports, so the composite branch must be checked FIRST, before
+        the generic port.position branch, to avoid bypassing the centering logic.
         """
         if self._definition is None:
             return
 
         rect = self.rect()
-        width_units = self._definition.visual.width
         height_units = self._definition.visual.height
 
         input_ports = [p for p in self._definition.ports if p.direction == PortDirection.IN]
         output_ports = [p for p in self._definition.ports if p.direction == PortDirection.OUT]
 
+        # Pre-compute y_offset once for all composite ports
+        composite_y_offset: float | None = None
+        if self._is_composite and self._composite_design:
+            composite_y_offset = self._compute_composite_y_offset()
+
         for port in self._definition.ports:
             port_item = PortItem(port, self)
 
-            if port.position is not None:
+            if self._is_composite:
+                # Composite: always derive position from port zone center + y_offset.
+                # Must come before the port.position check because the library loader
+                # always sets explicit positions (x=0/width, y=iface_y) which are
+                # in the design coordinate system, not the component view system.
+                header_h = self._composite_header_h()
+                sw = float(self._grid.size)
+                x_px = sw / 2 if port.direction == PortDirection.IN else rect.width() - sw / 2
+
+                # Resolve y from the matching interface port in the composite design
+                iface = next(
+                    (
+                        ip
+                        for ip in self._composite_design.interface_ports
+                        if ip.name == port.name
+                    ),
+                    None,
+                ) if self._composite_design else None
+
+                if iface and iface.position is not None and composite_y_offset is not None:
+                    y_px = header_h + self._grid.to_pixels(iface.position[1]) + composite_y_offset
+                elif iface and iface.position is not None:
+                    # No y_offset (no internal components to center around)
+                    y_px = header_h + self._grid.to_pixels(iface.position[1])
+                else:
+                    # Fallback: distribute evenly in body area
+                    if port.direction == PortDirection.IN:
+                        idx = input_ports.index(port)
+                        y_px = self._calculate_composite_port_y(
+                            idx, len(input_ports), rect.height(), header_h
+                        )
+                    else:
+                        idx = output_ports.index(port)
+                        y_px = self._calculate_composite_port_y(
+                            idx, len(output_ports), rect.height(), header_h
+                        )
+
+            elif port.position is not None:
                 x_px, y_px = port.get_pixel_position(self._grid)
+
             else:
                 if port.direction == PortDirection.IN:
                     idx = input_ports.index(port)
@@ -173,6 +270,19 @@ class ComponentItem(QGraphicsRectItem):
 
             port_item.setPos(x_px, y_px)
             self._port_items[port.name] = port_item
+
+    def _calculate_composite_port_y(
+        self, index: int, total: int, total_height_px: float, header_h: float
+    ) -> float:
+        """Calculate Y position for composite ports when no interface position is available.
+
+        Distributes ports evenly in the body area below the header.
+        """
+        body_h = total_height_px - header_h
+        if total == 1:
+            return header_h + body_h / 2
+        spacing = body_h / (total + 1)
+        return header_h + spacing * (index + 1)
 
     def _calculate_auto_port_y(self, index: int, total: int, height_units: int) -> float:
         """Calculate Y position for auto-placed ports.
@@ -203,15 +313,21 @@ class ComponentItem(QGraphicsRectItem):
         if not self._is_composite or not self._composite_design:
             return
 
-        # Create the composite view as a child item
         rect = self.rect()
+        header_h = self._composite_header_h()
+
+        # The view spans the full component width so that internal interface-port
+        # connection endpoints (at x=0 and x=bounds.width()) land exactly on top
+        # of the external PortItem circles.  Port zones are purely visual decorations
+        # drawn by paint() and do not shift the view origin.
         self._composite_view = CompositeViewItem(
             design=self._composite_design,
             library=self._library,
-            bounds=rect,
+            bounds=QRectF(0, 0, rect.width(), rect.height() - header_h),
             grid=self._grid,
             parent=self,
         )
+        self._composite_view.setPos(0, header_h)
 
     def get_instance(self) -> ComponentInstance:
         """Get the component instance model."""
@@ -242,6 +358,20 @@ class ComponentItem(QGraphicsRectItem):
         if self._is_temporary == is_temp:
             return
         self._is_temporary = is_temp
+        self._update_appearance()
+        self.update()
+
+    def set_invalid(self, is_invalid: bool) -> None:
+        """Toggle the red dashed 'invalid position' border.
+
+        Args:
+            is_invalid: True to show the invalid indicator, False to clear it.
+        """
+        if self._is_invalid == is_invalid:
+            return
+        self._is_invalid = is_invalid
+        if not is_invalid:
+            self._title_override = None
         self._update_appearance()
         self.update()
 
@@ -348,66 +478,109 @@ class ComponentItem(QGraphicsRectItem):
         painter.setBrush(brush)
         painter.drawRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
-        # For composite components, draw stage divider lines
-        if self._is_composite and self._instance.stage_count > 1:
-            stage_width = rect.width() / self._instance.stage_count
-            painter.setPen(QPen(self._base_color.darker(150), 1, Qt.PenStyle.DashLine))
-            for i in range(1, self._instance.stage_count):
-                x = rect.x() + stage_width * i
-                painter.drawLine(
-                    int(x), int(rect.y() + self.HEADER_HEIGHT),
-                    int(x), int(rect.y() + rect.height())
-                )
-
-        header_rect = QRectF(rect.x(), rect.y(), rect.width(), self.HEADER_HEIGHT)
-        painter.setBrush(QBrush(self._base_color.darker(120)))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(
-            header_rect.x(),
-            header_rect.y(),
-            header_rect.width(),
-            header_rect.height() + self.CORNER_RADIUS,
-            self.CORNER_RADIUS,
-            self.CORNER_RADIUS,
-        )
-        painter.drawRect(
-            header_rect.x(),
-            header_rect.y() + self.CORNER_RADIUS,
-            header_rect.width(),
-            header_rect.height() - self.CORNER_RADIUS,
-        )
-
-        # Draw composite indicator icon (small layered squares)
         if self._is_composite:
-            icon_size = 10
-            icon_x = rect.x() + 4
-            icon_y = rect.y() + (self.HEADER_HEIGHT - icon_size) / 2
+            header_h = self._composite_header_h()
+            zone_w = self._composite_port_zone_w()
+
+            # Input port zone (left): green, matching InterfaceStageItem input color
+            input_zone_color = QColor("#27ae60").lighter(150)
+            input_zone_color.setAlpha(180)
+            painter.setBrush(QBrush(input_zone_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                rect.x(), rect.y() + header_h,
+                zone_w, rect.height() - header_h,
+                0, 0,
+            )
+            # Output port zone (right): orange, matching InterfaceStageItem output color
+            output_zone_color = QColor("#e67e22").lighter(150)
+            output_zone_color.setAlpha(180)
+            painter.setBrush(QBrush(output_zone_color))
+            painter.drawRoundedRect(
+                rect.x() + rect.width() - zone_w, rect.y() + header_h,
+                zone_w, rect.height() - header_h,
+                0, 0,
+            )
+
+            # Draw stage divider lines in the content area (between port zones)
+            if self._instance.stage_count > 1:
+                content_x = rect.x() + zone_w
+                content_w = rect.width() - 2 * zone_w
+                stage_width = content_w / self._instance.stage_count
+                painter.setPen(QPen(self._base_color.darker(150), 1, Qt.PenStyle.DashLine))
+                for i in range(1, self._instance.stage_count):
+                    x = content_x + stage_width * i
+                    painter.drawLine(
+                        int(x), int(rect.y() + header_h),
+                        int(x), int(rect.y() + rect.height()),
+                    )
+
+            # Header (1 grid unit tall, full width)
+            header_rect = QRectF(rect.x(), rect.y(), rect.width(), header_h)
+            painter.setBrush(QBrush(self._base_color.darker(120)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                header_rect.x(), header_rect.y(),
+                header_rect.width(), header_rect.height() + self.CORNER_RADIUS,
+                self.CORNER_RADIUS, self.CORNER_RADIUS,
+            )
+            painter.drawRect(
+                header_rect.x(), header_rect.y() + self.CORNER_RADIUS,
+                header_rect.width(), header_rect.height() - self.CORNER_RADIUS,
+            )
+
+            # Composite indicator icon (small layered squares)
+            icon_size = 8
+            icon_x = rect.x() + 3
+            icon_y = rect.y() + (header_h - icon_size) / 2
             painter.setPen(QPen(QColor("#ffffff"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(int(icon_x), int(icon_y), icon_size - 2, icon_size - 2)
             painter.drawRect(int(icon_x + 2), int(icon_y + 2), icon_size - 2, icon_size - 2)
 
-        painter.setPen(QPen(QColor("#ffffff")))
-        font = QFont("Arial", 10, QFont.Weight.Bold)
-        painter.setFont(font)
-
-        name = self._instance.definition_ref
-        if self._definition:
-            name = self._definition.name
-
-        # For registers, show stage number
-        if self._is_register and self._instance.pipeline_stage is not None:
-            name = f"{name} [S{self._instance.pipeline_stage}]"
-        # For composite components, show latency
-        elif self._is_composite and self._instance.stage_count > 1:
-            name = f"{name} (L={self._instance.stage_count})"
-
-        # Adjust text position for composite (account for icon)
-        if self._is_composite:
-            text_rect = QRectF(header_rect.x() + 16, header_rect.y(),
-                              header_rect.width() - 16, header_rect.height())
+            # Label text
+            if self._title_override:
+                name = self._title_override
+            else:
+                name = self._definition.name if self._definition else self._instance.definition_ref
+                if self._instance.stage_count > 1:
+                    name = f"{name} (L={self._instance.stage_count})"
+            painter.setPen(QPen(QColor("#ffffff")))
+            font = QFont("Arial", 8, QFont.Weight.Bold)
+            painter.setFont(font)
+            text_rect = QRectF(
+                header_rect.x() + icon_size + 4, header_rect.y(),
+                header_rect.width() - icon_size - 6, header_rect.height(),
+            )
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, name)
+
         else:
+            # Non-composite: standard 24 px header
+            header_rect = QRectF(rect.x(), rect.y(), rect.width(), self.HEADER_HEIGHT)
+            painter.setBrush(QBrush(self._base_color.darker(120)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                header_rect.x(), header_rect.y(),
+                header_rect.width(), header_rect.height() + self.CORNER_RADIUS,
+                self.CORNER_RADIUS, self.CORNER_RADIUS,
+            )
+            painter.drawRect(
+                header_rect.x(), header_rect.y() + self.CORNER_RADIUS,
+                header_rect.width(), header_rect.height() - self.CORNER_RADIUS,
+            )
+
+            if self._title_override:
+                name = self._title_override
+            else:
+                name = self._instance.definition_ref
+                if self._definition:
+                    name = self._definition.name
+                if self._is_register and self._instance.pipeline_stage is not None:
+                    name = f"{name} [S{self._instance.pipeline_stage}]"
+
+            painter.setPen(QPen(QColor("#ffffff")))
+            font = QFont("Arial", 10, QFont.Weight.Bold)
+            painter.setFont(font)
             painter.drawText(header_rect, Qt.AlignmentFlag.AlignCenter, name)
 
     def boundingRect(self) -> QRectF:
@@ -430,6 +603,9 @@ class ComponentItem(QGraphicsRectItem):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle mouse release - record end position for undo."""
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._is_invalid:
+                self._title_override = "Invalid location – correct it for consistency!"
+                self.update()
             if self.on_move_end:
                 self.on_move_end()
             # Clear distance conflict highlighting for registers

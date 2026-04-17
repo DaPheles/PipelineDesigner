@@ -26,7 +26,7 @@ class InternalComponentItem(QGraphicsRectItem):
     """Read-only visualization of an internal component."""
 
     CORNER_RADIUS = 4.0
-    HEADER_HEIGHT = 12.0
+    HEADER_HEIGHT = 10.0
 
     def __init__(
         self,
@@ -147,14 +147,13 @@ class InternalStageItem(QGraphicsRectItem):
 
         self.setRect(0, 0, stage.width, height)
 
-        # Semi-transparent stage color
-        color = QColor("#f39c12")
-        color.setAlpha(60)
+        # Semi-transparent blue, matching the main pipeline stage appearance
+        color = QColor("#4a90d9")
+        color.setAlpha(40)
         self.setBrush(QBrush(color))
 
-        pen = QPen(QColor("#f39c12"))
+        pen = QPen(QColor("#4a90d9"))
         pen.setWidthF(1.5)
-        pen.setStyle(Qt.PenStyle.DashLine)
         self.setPen(pen)
 
     def paint(
@@ -172,7 +171,7 @@ class InternalStageItem(QGraphicsRectItem):
         painter.drawRect(rect)
 
         # Draw stage label
-        painter.setPen(QPen(QColor("#f39c12").darker(120)))
+        painter.setPen(QPen(QColor("#4a90d9").darker(120)))
         font = QFont("Arial", 7)
         painter.setFont(font)
         label = f"S{self._stage.index}"
@@ -274,11 +273,10 @@ class CompositeViewItem(QGraphicsRectItem):
         # Get the origin offset from the design's visual config
         # input_stage_x is the left edge of the component bounds in design grid coordinates
         origin_x = self._grid.to_pixels(self._design.visual.input_stage_x)
-        origin_y = 0  # Assume y origin at 0
 
-        # Calculate the y offset to center content vertically
-        # Account for header height in parent component
-        header_height = 24.0
+        # Calculate the y offset to center content vertically within this view's bounds.
+        # The view itself is already positioned below the header (via setPos in ComponentItem),
+        # so no additional header offset is needed here.
 
         # Find vertical bounds of content (positions are in grid units, convert to pixels)
         min_y = float('inf')
@@ -295,8 +293,8 @@ class CompositeViewItem(QGraphicsRectItem):
             max_y = max(max_y, y + h)
 
         content_height = max_y - min_y if max_y > min_y else 0
-        available_height = self._bounds.height() - header_height
-        y_offset = header_height + (available_height - content_height) / 2 - min_y
+        available_height = self._bounds.height()
+        y_offset = (available_height - content_height) / 2 - min_y
 
         # Create internal stage items first (background)
         # Stage positions are in grid units, convert to pixels
@@ -304,18 +302,17 @@ class CompositeViewItem(QGraphicsRectItem):
             # Convert stage position from grid units to pixels, then offset by origin
             stage_x_px = self._grid.to_pixels(stage.x_position) - origin_x
             stage_width_px = self._grid.to_pixels(stage.width)
-            stage_height = content_height if content_height > 0 else self._bounds.height() - header_height
 
-            # Create a stretched copy of the stage for visualization (in pixels)
+            # Stages extend the full body height (from just below the header to the bottom)
             stretched_stage = Stage(
                 id=stage.id,
                 index=stage.index,
-                x_position=stage_x_px,  # Already transformed to pixels
+                x_position=stage_x_px,
                 width=stage_width_px,
                 register_ids=stage.register_ids,
             )
-            item = InternalStageItem(stretched_stage, stage_height, parent=self)
-            item.setPos(stage_x_px, y_offset + min_y)
+            item = InternalStageItem(stretched_stage, self._bounds.height(), parent=self)
+            item.setPos(stage_x_px, 0)
             self._internal_items.append(item)
 
         # Create internal component items
@@ -406,17 +403,16 @@ class CompositeViewItem(QGraphicsRectItem):
             # Find the interface port to get its position
             for iface in self._design.interface_ports:
                 if str(iface.id) == str(interface_port_id):
+                    # x at center of port zone; y derived from design position
+                    # is_source=True → input interface (left side)
+                    # is_source=False → output interface (right side)
+                    zone_w = float(self._grid.size)
+                    x = zone_w / 2 if is_source else self._bounds.width() - zone_w / 2
                     if iface.position:
-                        # Apply stretch factor to x coordinate
-                        x = self._grid.to_pixels(iface.position[0]) - origin_x
                         y = self._grid.to_pixels(iface.position[1]) + y_offset
-                        return QPointF(x, y)
                     else:
-                        # Fallback: left or right edge (already at bounds)
-                        if is_source:
-                            return QPointF(0, self._bounds.height() / 2)
-                        else:
-                            return QPointF(self._bounds.width(), self._bounds.height() / 2)
+                        y = self._bounds.height() / 2
+                    return QPointF(x, y)
 
         return None
 
