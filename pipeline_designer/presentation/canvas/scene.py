@@ -1099,12 +1099,18 @@ class DesignScene(QGraphicsScene):
         return item
 
     def _rebuild_all_stages(self) -> None:
-        """Rebuild all stage items from scratch."""
-        for stage_id, item in list(self._stage_items.items()):
-            self.removeItem(item)
-        self._stage_items.clear()
+        """Sync stage items incrementally: update existing, add new, remove deleted."""
+        model_ids = {s.id for s in self._design.stages}
+
+        for stage_id in set(self._stage_items) - model_ids:
+            self.removeItem(self._stage_items.pop(stage_id))
+
         for stage in self._design.stages:
-            self._create_stage_item(stage)
+            item = self._stage_items.get(stage.id)
+            if item is not None:
+                item.update_stage(stage)
+            else:
+                self._create_stage_item(stage)
 
     def _update_all_pipeline_stages(self) -> None:
         """Update pipeline_stage for all registers based on current stages."""
