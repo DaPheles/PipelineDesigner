@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QLine, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
@@ -2028,16 +2028,20 @@ class DesignScene(QGraphicsScene):
 
         left = int(rect.left()) - (int(rect.left()) % grid_size)
         top = int(rect.top()) - (int(rect.top()) % grid_size)
+        right = int(rect.right())
+        bottom = int(rect.bottom())
 
+        lines = []
         x = left
-        while x < rect.right():
-            painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
+        while x <= right:
+            lines.append(QLine(x, top, x, bottom))
             x += grid_size
-
         y = top
-        while y < rect.bottom():
-            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+        while y <= bottom:
+            lines.append(QLine(left, y, right, y))
             y += grid_size
+
+        painter.drawLines(lines)
 
     # Undo/Redo methods
 
