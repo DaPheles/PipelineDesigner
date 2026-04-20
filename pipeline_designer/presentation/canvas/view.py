@@ -194,11 +194,25 @@ class DesignView(QGraphicsView):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        """Handle drag move for component drops."""
+        """Handle drag move — show port placement preview when dragging a port."""
         if event.mimeData().hasText():
+            item_data = event.mimeData().text()
+            scene = self.scene()
+            if isinstance(scene, DesignScene) and is_port_item(item_data):
+                scene_pos = self.mapToScene(event.position().toPoint())
+                scene.show_interface_port_preview(
+                    scene_pos.x(), scene_pos.y(), is_input_port_item(item_data)
+                )
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        """Clear port preview when drag leaves the view."""
+        scene = self.scene()
+        if isinstance(scene, DesignScene):
+            scene.clear_interface_port_preview()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
         """Handle drop for component or port creation."""
@@ -207,6 +221,7 @@ class DesignView(QGraphicsView):
             scene_pos = self.mapToScene(event.position().toPoint())
             scene = self.scene()
             if isinstance(scene, DesignScene):
+                scene.clear_interface_port_preview()
                 if is_port_item(item_data):
                     # Handle port drops - must be on the correct stage
                     is_input = is_input_port_item(item_data)

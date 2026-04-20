@@ -4,7 +4,7 @@ from uuid import UUID
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 from pipeline_designer.domain.models import (
@@ -94,6 +94,7 @@ class DesignScene(QGraphicsScene):
         self._component_bounds: ComponentBoundsItem | None = None
         self._interface_enabled = True  # Enable interface stages by default
         self._interface_port_items: dict[UUID, InterfacePortItem] = {}
+        self._preview_port_item: QGraphicsEllipseItem | None = None
 
         # Track items with distance conflicts (made semi-transparent)
         self._conflict_items: set[UUID] = set()
@@ -197,14 +198,22 @@ class DesignScene(QGraphicsScene):
         # Clear the tracking dictionary
         self._interface_port_items.clear()
 
-        # Create ports from design interface_ports
+        # Create ports from design interface_ports, restoring saved positions
         for iface_port in self._design.get_input_interfaces():
             port_item = self._create_interface_port_item(iface_port, is_input=True)
             self._input_stage.add_port(port_item)
+            rel_y = (iface_port.position[1] * self._grid.size
+                     if iface_port.position
+                     else self._input_stage.rect().height() / 2)
+            port_item.set_pos_exact(InterfaceStageItem.STAGE_WIDTH / 2, rel_y)
 
         for iface_port in self._design.get_output_interfaces():
             port_item = self._create_interface_port_item(iface_port, is_input=False)
             self._output_stage.add_port(port_item)
+            rel_y = (iface_port.position[1] * self._grid.size
+                     if iface_port.position
+                     else self._output_stage.rect().height() / 2)
+            port_item.set_pos_exact(InterfaceStageItem.STAGE_WIDTH / 2, rel_y)
 
     def _create_interface_port_item(
         self, iface_port: InterfacePort, is_input: bool
@@ -218,9 +227,15 @@ class DesignScene(QGraphicsScene):
             iface_port.id
         )
 
+        # Wire up reposition callbacks (Ctrl+drag)
+        port_item.on_reposition_preview = lambda sy: self._on_reposition_preview(
+            iface_port.id, sy, is_input
+        )
+        port_item.on_reposition_commit = lambda sy: self._on_reposition_commit(
+            iface_port.id, sy, is_input
+        )
+
         # Wire up connection callback
-        # Input interface ports act as sources (they provide data to the design)
-        # Output interface ports act as targets (they receive data from the design)
         if is_input:
             port_item.on_connection_start = lambda: self._start_interface_connection(
                 port_item
@@ -233,6 +248,46 @@ class DesignScene(QGraphicsScene):
         port_item = self._interface_port_items.get(port_id)
         if port_item:
             port_item.update_model_position()
+
+    def _on_reposition_preview(self, port_id: UUID, scene_y: float, is_input: bool) -> None:
+        """Show reposition preview clamped and snapped within the stage."""
+        stage = self._input_stage if is_input else self._output_stage
+        if stage is None:
+            return
+        stage_rect = stage.sceneBoundingRect()
+        clamped_y = max(stage_rect.top(), min(stage_rect.bottom(), scene_y))
+        snapped_y = self._grid.snap_to_grid(clamped_y)
+        preview_x = stage.scenePos().x() + InterfaceStageItem.STAGE_WIDTH / 2
+        radius = InterfacePortItem.PORT_RADIUS
+        color = QColor("#27ae60") if is_input else QColor("#e67e22")
+
+        if self._preview_port_item is None:
+            self._preview_port_item = QGraphicsEllipseItem(
+                -radius, -radius, radius * 2, radius * 2
+            )
+            self._preview_port_item.setZValue(20)
+            self.addItem(self._preview_port_item)
+
+        pen = QPen(color.darker(120))
+        pen.setWidth(2)
+        self._preview_port_item.setPen(pen)
+        self._preview_port_item.setBrush(QBrush(color.lighter(150)))
+        self._preview_port_item.setOpacity(0.5)
+        self._preview_port_item.setPos(preview_x, snapped_y)
+
+    def _on_reposition_commit(self, port_id: UUID, scene_y: float, is_input: bool) -> None:
+        """Commit a repositioned port to the clamped, snapped location."""
+        self.clear_interface_port_preview()
+        stage = self._input_stage if is_input else self._output_stage
+        port_item = self._interface_port_items.get(port_id)
+        if port_item is None or stage is None:
+            return
+        stage_rect = stage.sceneBoundingRect()
+        clamped_y = max(stage_rect.top(), min(stage_rect.bottom(), scene_y))
+        snapped_y = self._grid.snap_to_grid(clamped_y)
+        rel_y = snapped_y - stage.scenePos().y()
+        port_item.set_pos_exact(InterfaceStageItem.STAGE_WIDTH / 2, rel_y)
+        port_item.update_model_position()
 
     def add_interface_port_at(self, x: float, y: float, is_input: bool) -> bool:
         """Add an interface port at the given position.
@@ -248,6 +303,8 @@ class DesignScene(QGraphicsScene):
         Returns:
             True if the port was created, False if dropped in wrong location.
         """
+        self.clear_interface_port_preview()
+
         if not self._input_stage or not self._output_stage:
             return False
 
@@ -280,9 +337,11 @@ class DesignScene(QGraphicsScene):
             port_name = f"{base_name}{counter}"
             counter += 1
 
-        # Calculate position in grid units
+        # Position is stage-relative (y stored in grid units relative to stage top)
+        stage_y = target_stage.pos().y()
+        rel_y = snapped_y - stage_y
         grid_x = int(x / self._grid.size)
-        grid_y = int(snapped_y / self._grid.size)
+        grid_y = int(rel_y / self._grid.size)
 
         # Create the interface port model
         direction = InterfaceDirection.INPUT if is_input else InterfaceDirection.OUTPUT
@@ -293,22 +352,11 @@ class DesignScene(QGraphicsScene):
             position=(grid_x, grid_y),
         )
 
-        # Add to design
         self._design.interface_ports.append(iface_port)
 
-        # Create the graphics item
         port_item = self._create_interface_port_item(iface_port, is_input)
-
-        # Set the position (relative to stage because it will be added as child)
-        rel_x = InterfaceStageItem.STAGE_WIDTH / 2  # Horizontally centered in stage
-
-        # Calculate relative y position within the stage
-        stage_y = target_stage.pos().y()
-        rel_y = snapped_y - stage_y
-
-        # Add to stage without auto-positioning (preserve manual position)
-        target_stage.add_port(port_item, auto_position=False)
-        port_item.setPos(rel_x, rel_y)
+        target_stage.add_port(port_item)
+        port_item.set_pos_exact(InterfaceStageItem.STAGE_WIDTH / 2, rel_y)
 
         # Update bounds
         self._update_component_bounds()
@@ -342,6 +390,42 @@ class DesignScene(QGraphicsScene):
     def get_interface_port_item(self, port_id: UUID) -> InterfacePortItem | None:
         """Get an interface port item by ID."""
         return self._interface_port_items.get(port_id)
+
+    def show_interface_port_preview(self, x: float, y: float, is_input: bool) -> None:
+        """Show a semi-transparent preview circle for a port about to be placed."""
+        target_stage = self._input_stage if is_input else self._output_stage
+        if target_stage is None:
+            self.clear_interface_port_preview()
+            return
+
+        if not target_stage.sceneBoundingRect().contains(x, y):
+            self.clear_interface_port_preview()
+            return
+
+        snapped_y = self._grid.snap_to_grid(y)
+        preview_x = target_stage.scenePos().x() + InterfaceStageItem.STAGE_WIDTH / 2
+        radius = InterfacePortItem.PORT_RADIUS
+        color = QColor("#27ae60") if is_input else QColor("#e67e22")
+
+        if self._preview_port_item is None:
+            self._preview_port_item = QGraphicsEllipseItem(
+                -radius, -radius, radius * 2, radius * 2
+            )
+            self._preview_port_item.setZValue(20)
+            self.addItem(self._preview_port_item)
+
+        pen = QPen(color.darker(120))
+        pen.setWidth(2)
+        self._preview_port_item.setPen(pen)
+        self._preview_port_item.setBrush(QBrush(color.lighter(150)))
+        self._preview_port_item.setOpacity(0.5)
+        self._preview_port_item.setPos(preview_x, snapped_y)
+
+    def clear_interface_port_preview(self) -> None:
+        """Remove the port placement preview."""
+        if self._preview_port_item is not None:
+            self.removeItem(self._preview_port_item)
+            self._preview_port_item = None
 
     def _update_component_bounds(self) -> None:
         """Update the component bounds rectangle.

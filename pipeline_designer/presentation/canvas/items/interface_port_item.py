@@ -47,17 +47,20 @@ class InterfacePortItem(QGraphicsEllipseItem):
         self._interface_port = interface_port
         self._is_connected = False
         self._grid = grid or DEFAULT_GRID
+        self._repositioning = False
+        self._suppress_snap = False
 
-        # Callbacks for connection creation and position changes
+        # Callbacks
         self.on_connection_start: Callable[[], None] | None = None
         self.on_position_changed: Callable[[float], None] | None = None
+        self.on_reposition_preview: Callable[[float], None] | None = None  # scene y
+        self.on_reposition_commit: Callable[[float], None] | None = None   # scene y
 
         self._setup_item()
 
     def _setup_item(self) -> None:
         """Configure item settings."""
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(10)  # Above most items
@@ -120,9 +123,17 @@ class InterfacePortItem(QGraphicsEllipseItem):
         else:
             self._update_appearance()
 
+    def set_pos_exact(self, x: float, y: float) -> None:
+        """Set position bypassing the itemChange y-snap (y must already be correct)."""
+        self._suppress_snap = True
+        self.setPos(x, y)
+        self._suppress_snap = False
+
     def itemChange(self, change, value):
         """Handle item changes for vertical-only movement."""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            if self._suppress_snap:
+                return value
             # Snap y to grid; preserve whatever x was given (supports programmatic centering)
             new_y = self._grid.snap_to_grid(value.y())
             return QPointF(value.x(), new_y)
@@ -138,11 +149,9 @@ class InterfacePortItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
     def update_model_position(self) -> None:
-        """Update the interface port model with the current scene position."""
-        scene_pos = self.scenePos()
-        # Store position in grid units
-        grid_x = int(scene_pos.x() / self._grid.size)
-        grid_y = int(scene_pos.y() / self._grid.size)
+        """Update the interface port model. y is stored relative to parent stage."""
+        grid_x = int(self.scenePos().x() / self._grid.size)
+        grid_y = int(self.pos().y() / self._grid.size)
         self._interface_port.position = (grid_x, grid_y)
 
     def paint(
@@ -205,15 +214,41 @@ class InterfacePortItem(QGraphicsEllipseItem):
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse press for connection creation."""
+        """Ctrl+left-click starts reposition mode; plain left-click starts a connection."""
         if event.button() == Qt.MouseButton.LeftButton:
-            # Interface output ports can start connections (they feed INTO the design)
-            # Interface input ports receive connections (they receive FROM the design)
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._repositioning = True
+                self.grabMouse()
+                event.accept()
+                if self.on_reposition_preview:
+                    self.on_reposition_preview(self.scenePos().y())
+                return
             if self.is_input() and self.on_connection_start:
-                # Input interface ports act as outputs (they provide data to the design)
                 self.on_connection_start()
                 return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """During reposition mode, update the preview to follow the mouse."""
+        if self._repositioning:
+            scene_y = self.mapToScene(event.pos()).y()
+            if self.on_reposition_preview:
+                self.on_reposition_preview(scene_y)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Commit the new position on release."""
+        if self._repositioning and event.button() == Qt.MouseButton.LeftButton:
+            self._repositioning = False
+            self.ungrabMouse()
+            scene_y = self.mapToScene(event.pos()).y()
+            if self.on_reposition_commit:
+                self.on_reposition_commit(scene_y)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def hoverEnterEvent(self, event) -> None:
         """Handle hover enter."""

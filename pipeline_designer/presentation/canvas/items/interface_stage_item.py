@@ -96,28 +96,15 @@ class InterfaceStageItem(QGraphicsRectItem):
         return self.pos().x()
 
     def set_height(self, height: float, y_offset: float = 0) -> None:
-        """Set the height and vertical position of the stage.
-
-        The stage will exactly match the given height and y_offset,
-        aligning with the component bounds rectangle.
-        """
+        """Set the height and vertical position of the stage."""
         self._height = height
         self.setRect(0, 0, self.STAGE_WIDTH, self._height)
         self.setY(y_offset)
-        self._reposition_ports()
 
-    def add_port(self, port_item: "InterfacePortItem", auto_position: bool = True) -> None:
-        """Add a port item to this stage.
-
-        Args:
-            port_item: The interface port item to add.
-            auto_position: If True, automatically reposition all ports evenly.
-                          If False, preserve the port's current position.
-        """
+    def add_port(self, port_item: "InterfacePortItem") -> None:
+        """Add a port item to this stage. Position must be set by the caller."""
         port_item.setParentItem(self)
         self._port_items.append(port_item)
-        if auto_position:
-            self._reposition_ports()
 
     def get_ports(self) -> list["InterfacePortItem"]:
         """Get all port items."""
