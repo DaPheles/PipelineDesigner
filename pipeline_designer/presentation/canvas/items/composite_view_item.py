@@ -153,7 +153,7 @@ class InternalStageItem(QGraphicsRectItem):
         self.setBrush(QBrush(color))
 
         pen = QPen(QColor("#4a90d9"))
-        pen.setWidthF(1.5)
+        pen.setWidthF(1.0)
         self.setPen(pen)
 
     def paint(
@@ -172,7 +172,7 @@ class InternalStageItem(QGraphicsRectItem):
 
         # Draw stage label
         painter.setPen(QPen(QColor("#4a90d9").darker(120)))
-        font = QFont("Arial", 7)
+        font = QFont("Arial", 8)
         painter.setFont(font)
         label = f"S{self._stage.index}"
         painter.drawText(rect, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, label)

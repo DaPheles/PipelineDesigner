@@ -299,20 +299,8 @@ class DesignScene(QGraphicsScene):
         # Create the graphics item
         port_item = self._create_interface_port_item(iface_port, is_input)
 
-        # Position the port - centered horizontally on the stage
-        stage_x = target_stage.get_x_position()
-        if is_input:
-            # Input ports on right edge of input stage
-            port_x = stage_x + InterfaceStageItem.STAGE_WIDTH
-        else:
-            # Output ports on left edge of output stage
-            port_x = stage_x
-
         # Set the position (relative to stage because it will be added as child)
-        if is_input:
-            rel_x = InterfaceStageItem.STAGE_WIDTH
-        else:
-            rel_x = 0
+        rel_x = InterfaceStageItem.STAGE_WIDTH / 2  # Horizontally centered in stage
 
         # Calculate relative y position within the stage
         stage_y = target_stage.pos().y()
@@ -1143,8 +1131,8 @@ class DesignScene(QGraphicsScene):
             item.avoid_stage_overlap = self._avoid_stage_overlap
 
         # Restore temporary visual state if the instance was marked temporary
-        if instance.is_position_temporary:
-            item.set_temporary(True)
+        #if instance.is_position_temporary:
+        #    item.set_temporary(True)
 
         # Wire up port callbacks for connections
         self._wire_port_callbacks(item)

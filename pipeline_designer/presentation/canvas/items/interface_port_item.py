@@ -26,7 +26,7 @@ class InterfacePortItem(QGraphicsEllipseItem):
 
     # Larger radius for interface ports
     PORT_RADIUS = 12.0
-    LABEL_OFFSET = 20.0
+    LABEL_OFFSET = 16.0
 
     def __init__(
         self,
@@ -123,9 +123,9 @@ class InterfacePortItem(QGraphicsEllipseItem):
     def itemChange(self, change, value):
         """Handle item changes for vertical-only movement."""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
-            # Constrain to vertical movement only (keep x constant)
+            # Snap y to grid; preserve whatever x was given (supports programmatic centering)
             new_y = self._grid.snap_to_grid(value.y())
-            return QPointF(self.pos().x(), new_y)
+            return QPointF(value.x(), new_y)
 
         elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             # Update the interface port model position
@@ -188,7 +188,7 @@ class InterfacePortItem(QGraphicsEllipseItem):
         if self._interface_port.direction == InterfaceDirection.INPUT:
             # Label to the left of the port
             label_rect = QRectF(
-                -self.PORT_RADIUS - 105,
+                -self.PORT_RADIUS - 100 - self.LABEL_OFFSET,
                 -10,
                 100,
                 20,
@@ -197,7 +197,7 @@ class InterfacePortItem(QGraphicsEllipseItem):
         else:
             # Label to the right of the port
             label_rect = QRectF(
-                self.PORT_RADIUS + 5,
+                self.PORT_RADIUS + self.LABEL_OFFSET,
                 -10,
                 100,
                 20,

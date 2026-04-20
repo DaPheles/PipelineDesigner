@@ -30,7 +30,7 @@ class ComponentItem(QGraphicsRectItem):
     and movements trigger stage reassignment via the register_moved callback.
     """
 
-    CORNER_RADIUS = 8.0
+    CORNER_RADIUS = 2.0
     SELECTION_PADDING = 4.0
     HEADER_HEIGHT = 20.0  # used for non-composite components
 

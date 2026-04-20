@@ -133,10 +133,7 @@ class InterfaceStageItem(QGraphicsRectItem):
 
         for i, port_item in enumerate(self._port_items):
             y = spacing * (i + 1)
-            if self._is_input:
-                x = self.STAGE_WIDTH # Right edge for input
-            else:
-                x = 0  # Left edge for output
+            x = self.STAGE_WIDTH / 2  # Horizontally centered in stage
             port_item.setPos(x, y)
 
     def itemChange(self, change, value):
