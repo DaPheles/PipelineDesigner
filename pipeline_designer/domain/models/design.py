@@ -3,7 +3,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .instance import ComponentInstance, Connection, InterfaceDirection, InterfacePort
 from .stage import Stage
@@ -80,6 +82,20 @@ class Design(BaseModel):
         default_factory=DesignMetadata, description="Design metadata"
     )
 
+    # O(1) lookup indices — not serialised, rebuilt from lists on init/mutation
+    _component_index: dict[UUID, ComponentInstance] = PrivateAttr(default_factory=dict)
+    _stage_id_index: dict[UUID, Stage] = PrivateAttr(default_factory=dict)
+    _stage_num_index: dict[int, Stage] = PrivateAttr(default_factory=dict)
+    _interface_port_index: dict[UUID, InterfacePort] = PrivateAttr(default_factory=dict)
+    _connection_index: dict[UUID, Connection] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        self._component_index = {c.id: c for c in self.components}
+        self._stage_id_index = {s.id: s for s in self.stages}
+        self._stage_num_index = {s.index: s for s in self.stages}
+        self._interface_port_index = {p.id: p for p in self.interface_ports}
+        self._connection_index = {c.id: c for c in self.connections}
+
     @property
     def latency(self) -> int:
         """Get the latency (number of pipeline stages)."""
@@ -100,52 +116,51 @@ class Design(BaseModel):
 
     def get_component_by_id(self, component_id: UUID) -> ComponentInstance | None:
         """Get a component instance by ID."""
-        for component in self.components:
-            if component.id == component_id:
-                return component
-        return None
+        return self._component_index.get(component_id)
 
     def add_component(self, component: ComponentInstance) -> None:
         """Add a component instance to the design."""
         self.components.append(component)
+        self._component_index[component.id] = component
         self.metadata.modified_at = datetime.now()
 
     def remove_component(self, component_id: UUID) -> bool:
         """Remove a component instance and its connections."""
-        component = self.get_component_by_id(component_id)
+        component = self._component_index.pop(component_id, None)
         if component is None:
             return False
 
         self.components.remove(component)
-        self.connections = [
-            conn
+        removed_conn_ids = {
+            conn.id
             for conn in self.connections
-            if conn.source.component_id != component_id
-            and conn.target.component_id != component_id
-        ]
+            if conn.source.component_id == component_id
+            or conn.target.component_id == component_id
+        }
+        self.connections = [c for c in self.connections if c.id not in removed_conn_ids]
+        for cid in removed_conn_ids:
+            self._connection_index.pop(cid, None)
         self.metadata.modified_at = datetime.now()
         return True
 
     def add_connection(self, connection: Connection) -> None:
         """Add a connection to the design."""
         self.connections.append(connection)
+        self._connection_index[connection.id] = connection
         self.metadata.modified_at = datetime.now()
 
     def remove_connection(self, connection_id: UUID) -> bool:
         """Remove a connection from the design."""
-        for conn in self.connections:
-            if conn.id == connection_id:
-                self.connections.remove(conn)
-                self.metadata.modified_at = datetime.now()
-                return True
-        return False
+        conn = self._connection_index.pop(connection_id, None)
+        if conn is None:
+            return False
+        self.connections.remove(conn)
+        self.metadata.modified_at = datetime.now()
+        return True
 
     def get_stage_by_id(self, stage_id: UUID) -> Stage | None:
         """Get a stage by ID."""
-        for stage in self.stages:
-            if stage.id == stage_id:
-                return stage
-        return None
+        return self._stage_id_index.get(stage_id)
 
     def get_stage_at_x(self, x: float) -> Stage | None:
         """Get the stage at a given x position."""
@@ -156,10 +171,7 @@ class Design(BaseModel):
 
     def get_stage_by_index(self, index: int) -> Stage | None:
         """Get a stage by its index."""
-        for stage in self.stages:
-            if stage.index == index:
-                return stage
-        return None
+        return self._stage_num_index.get(index)
 
     def get_registers(self) -> list[ComponentInstance]:
         """Get all register component instances."""
@@ -171,6 +183,8 @@ class Design(BaseModel):
         for i, stage in enumerate(sorted_stages, start=1):
             stage.index = i
         self.stages = sorted_stages
+        self._stage_id_index = {s.id: s for s in self.stages}
+        self._stage_num_index = {s.index: s for s in self.stages}
         self.metadata.modified_at = datetime.now()
 
     def remove_empty_stages(self) -> list[Stage]:
@@ -184,23 +198,21 @@ class Design(BaseModel):
     def add_interface_port(self, port: InterfacePort) -> None:
         """Add an interface port to the design."""
         self.interface_ports.append(port)
+        self._interface_port_index[port.id] = port
         self.metadata.modified_at = datetime.now()
 
     def remove_interface_port(self, port_id: UUID) -> bool:
         """Remove an interface port from the design."""
-        for port in self.interface_ports:
-            if port.id == port_id:
-                self.interface_ports.remove(port)
-                self.metadata.modified_at = datetime.now()
-                return True
-        return False
+        port = self._interface_port_index.pop(port_id, None)
+        if port is None:
+            return False
+        self.interface_ports.remove(port)
+        self.metadata.modified_at = datetime.now()
+        return True
 
     def get_interface_port_by_id(self, port_id: UUID) -> InterfacePort | None:
         """Get an interface port by ID."""
-        for port in self.interface_ports:
-            if port.id == port_id:
-                return port
-        return None
+        return self._interface_port_index.get(port_id)
 
     def update_visual_extent(
         self,
