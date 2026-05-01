@@ -44,12 +44,15 @@ class LibraryLoader:
         self._categories: dict[str, list[str]] = {}
         # Store original designs for composite components
         self._composite_designs: dict[str, Design] = {}
+        # Track file path for each primitive (non-composite) for save/delete
+        self._primitive_file_paths: dict[str, Path] = {}
 
     def load_all(self) -> None:
         """Load all component definitions from the library directory."""
         self._components.clear()
         self._categories.clear()
         self._composite_designs.clear()
+        self._primitive_file_paths.clear()
 
         if not self.library_path.exists():
             return
@@ -85,6 +88,7 @@ class LibraryLoader:
                 print(f"Warning: {file_path.name}: {error}")
 
         self._components[component.name] = component
+        self._primitive_file_paths[component.name] = file_path
 
         if component.category not in self._categories:
             self._categories[component.category] = []
@@ -208,3 +212,84 @@ class LibraryLoader:
     def get_all_composite_designs(self) -> dict[str, Design]:
         """Get all composite component designs."""
         return self._composite_designs.copy()
+
+    # ------------------------------------------------------------------ #
+    # Primitive CRUD (non-composite components only)                       #
+    # ------------------------------------------------------------------ #
+
+    def get_primitive_names(self) -> list[str]:
+        """Return names of all loaded primitives (non-composite)."""
+        return sorted(
+            name
+            for name in self._components
+            if name not in self._composite_designs
+        )
+
+    def get_primitive_file_path(self, name: str) -> Path | None:
+        """Return the JSON file path for a primitive, or None if unknown."""
+        return self._primitive_file_paths.get(name)
+
+    def save_primitive(
+        self,
+        component: ComponentDefinition,
+        file_path: Path | None = None,
+    ) -> Path:
+        """Persist a primitive definition to JSON and update in-memory state.
+
+        If *file_path* is not given, the existing path for this component name
+        is reused; otherwise a new file is created under library/primitives/.
+        """
+        if file_path is None:
+            file_path = self._primitive_file_paths.get(component.name)
+        if file_path is None:
+            safe = component.name.lower().replace(" ", "_")
+            file_path = self.library_path / "primitives" / f"{safe}.json"
+
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        data = component.model_dump(mode="json", exclude_none=True)
+        file_path.write_text(json.dumps(data, indent=4))
+
+        # Update in-memory registry
+        old_name = next(
+            (n for n, p in self._primitive_file_paths.items() if p == file_path),
+            None,
+        )
+        if old_name and old_name != component.name:
+            # Component was renamed — remove old entry
+            self._components.pop(old_name, None)
+            self._primitive_file_paths.pop(old_name, None)
+            for cat_list in self._categories.values():
+                if old_name in cat_list:
+                    cat_list.remove(old_name)
+
+        self._components[component.name] = component
+        self._primitive_file_paths[component.name] = file_path
+
+        cat = component.category
+        if cat not in self._categories:
+            self._categories[cat] = []
+        if component.name not in self._categories[cat]:
+            self._categories[cat].append(component.name)
+
+        return file_path
+
+    def delete_primitive(self, name: str) -> bool:
+        """Remove a primitive from the library and delete its JSON file.
+
+        Returns True if the primitive existed and was removed.
+        """
+        if name in self._composite_designs:
+            return False  # refuse to delete composites this way
+
+        component = self._components.pop(name, None)
+        file_path = self._primitive_file_paths.pop(name, None)
+
+        if component:
+            cat_list = self._categories.get(component.category, [])
+            if name in cat_list:
+                cat_list.remove(name)
+
+        if file_path and file_path.exists():
+            file_path.unlink()
+
+        return component is not None

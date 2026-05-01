@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from pipeline_designer.domain.grid import DEFAULT_GRID, GridConfig
+from pipeline_designer.domain.models.behavior import ComponentBehavior
 
 
 class PortDirection(str, Enum):
@@ -36,6 +37,14 @@ class Port(BaseModel):
     )
     is_clock: bool = Field(default=False, description="Whether this is a clock port")
     is_reset: bool = Field(default=False, description="Whether this is a reset port")
+    vector_range: str | None = Field(
+        default=None,
+        description=(
+            "Vector index range as 'MSB:LSB' (e.g. '7:0' or 'WIDTH-1:0'). "
+            "Only meaningful for std_logic_vector and similar array types. "
+            "Maps to VHDL: std_logic_vector(MSB downto LSB)."
+        ),
+    )
 
     def get_pixel_position(self, grid: GridConfig | None = None) -> tuple[float, float]:
         """Get the port position in pixels.
@@ -103,6 +112,10 @@ class ComponentDefinition(BaseModel):
         default_factory=VisualConfig, description="Visual configuration"
     )
     latency: int = Field(default=0, description="Pipeline latency in clock cycles")
+    behavior: ComponentBehavior = Field(
+        default_factory=ComponentBehavior,
+        description="Functional pseudo-code description with typed fixed-point port annotations",
+    )
 
     def get_input_ports(self) -> list[Port]:
         """Get all input ports."""

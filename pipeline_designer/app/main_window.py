@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self._config = config or AppConfig()
         self._library_loader = LibraryLoader()
         self._current_file: Path | None = None
+        self._primitive_editor = None  # lazy-created singleton
 
         self._setup_ui()
         self._setup_menus()
@@ -120,6 +121,13 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        library_menu = menu_bar.addMenu("&Library")
+
+        primitive_editor_action = QAction("&Primitive Editor...", self)
+        primitive_editor_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        primitive_editor_action.triggered.connect(self._on_primitive_editor)
+        library_menu.addAction(primitive_editor_action)
 
         view_menu = menu_bar.addMenu("&View")
 
@@ -338,6 +346,28 @@ class MainWindow(QMainWindow):
         if port_item:
             # Force a repaint to update the label
             port_item.update()
+
+    def _on_primitive_editor(self) -> None:
+        """Open (or raise) the primitive editor window."""
+        if self._primitive_editor is None:
+            from pipeline_designer.presentation.primitive_editor import PrimitiveEditorWindow
+
+            library_path = self._config.library_path or AppConfig.get_default_library_path()
+            self._primitive_editor = PrimitiveEditorWindow(
+                self._library_loader,
+                library_path,
+                parent=None,
+            )
+            self._primitive_editor.primitives_changed.connect(self._on_primitives_changed)
+
+        self._primitive_editor.show()
+        self._primitive_editor.raise_()
+        self._primitive_editor.activateWindow()
+
+    def _on_primitives_changed(self) -> None:
+        """Reload the library after primitives are created, edited, or deleted."""
+        self._load_library()
+        self._status_bar.showMessage("Library reloaded")
 
     def get_scene(self) -> DesignScene:
         """Get the design scene."""

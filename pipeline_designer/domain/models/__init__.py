@@ -1,5 +1,6 @@
 """Domain models for pipeline designer."""
 
+from .behavior import BehaviorPortType, ComponentBehavior, FixedPointKind
 from .component import (
     ComponentDefinition,
     Generic,
@@ -18,6 +19,9 @@ from .instance import (
 from .stage import Stage
 
 __all__ = [
+    "FixedPointKind",
+    "BehaviorPortType",
+    "ComponentBehavior",
     "PortDirection",
     "Port",
     "Generic",

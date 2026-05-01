@@ -7,25 +7,45 @@
             "name": "a",
             "direction": "in",
             "data_type": "std_logic_vector",
-            "position": [0, 2]
+            "position": [
+                0,
+                2
+            ],
+            "is_clock": false,
+            "is_reset": false
         },
         {
             "name": "b",
             "direction": "in",
             "data_type": "std_logic_vector",
-            "position": [0, 4]
+            "position": [
+                0,
+                4
+            ],
+            "is_clock": false,
+            "is_reset": false
         },
         {
             "name": "sum",
             "direction": "out",
             "data_type": "std_logic_vector",
-            "position": [5, 2]
+            "position": [
+                5,
+                2
+            ],
+            "is_clock": false,
+            "is_reset": false
         },
         {
             "name": "cout",
             "direction": "out",
             "data_type": "std_logic",
-            "position": [5, 4]
+            "position": [
+                5,
+                4
+            ],
+            "is_clock": false,
+            "is_reset": false
         }
     ],
     "generics": [
@@ -37,8 +57,33 @@
     ],
     "visual": {
         "width": 5,
-        "height": 5,
+        "height": 6,
         "color": "#ed7d31"
     },
-    "latency": 0
+    "latency": 0,
+    "behavior": {
+        "code": "",
+        "port_types": {
+            "a": {
+                "kind": "sfixed",
+                "msb": "",
+                "lsb": ""
+            },
+            "b": {
+                "kind": "sfixed",
+                "msb": "",
+                "lsb": ""
+            },
+            "sum": {
+                "kind": "sfixed",
+                "msb": "",
+                "lsb": ""
+            },
+            "cout": {
+                "kind": "sfixed",
+                "msb": "",
+                "lsb": ""
+            }
+        }
+    }
 }
