@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsPathItem,
     QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -66,6 +67,69 @@ class InternalComponentItem(QGraphicsRectItem):
         pen.setWidthF(1.5)
         self.setPen(pen)
         self.setBrush(QBrush(self._base_color))
+
+        self._create_port_items()
+
+    def _create_port_items(self) -> None:
+        """Create port dot + label children for each port in the definition."""
+        if not self._definition:
+            return
+
+        PORT_RADIUS = 5.0
+        COLOR_INPUT  = QColor("#70ad47")
+        COLOR_OUTPUT = QColor("#ed7d31")
+        COLOR_CLOCK  = QColor("#5b9bd5")
+        COLOR_RESET  = QColor("#c45911")
+
+        rect = self.rect()
+
+        for port in self._definition.ports:
+            if port.position is not None:
+                x_px = self._grid.to_pixels(port.position[0])
+                y_px = self._grid.to_pixels(port.position[1])
+            elif port.direction == PortDirection.OUT:
+                x_px = rect.width()
+                y_px = rect.height() / 2
+            else:
+                x_px = 0.0
+                y_px = rect.height() / 2
+
+            if port.is_clock:
+                color = COLOR_CLOCK
+            elif port.is_reset:
+                color = COLOR_RESET
+            elif port.direction == PortDirection.IN:
+                color = COLOR_INPUT
+            else:
+                color = COLOR_OUTPUT
+
+            dot = QGraphicsEllipseItem(
+                -PORT_RADIUS, -PORT_RADIUS, PORT_RADIUS * 2, PORT_RADIUS * 2, self
+            )
+            dot.setBrush(QBrush(color))
+            dot.setPen(QPen(color.darker(150), 1.5))
+            dot.setPos(x_px, y_px)
+            dot.setZValue(3)
+            dot.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+
+            label = QGraphicsSimpleTextItem(port.name, dot)
+            label.setFont(QFont("sans-serif", 6))
+            label.setBrush(QColor("#ffffff"))
+            label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            label.setZValue(-1)
+
+            br = label.boundingRect()
+            lw, lh = br.width(), br.height()
+            tol = PORT_RADIUS + 4
+
+            if x_px < tol:
+                label.setPos(PORT_RADIUS + 3, -lh / 2)
+            elif x_px > rect.width() - tol:
+                label.setPos(-lw - PORT_RADIUS - 3, -lh / 2)
+            elif y_px < tol:
+                label.setPos(-lw / 2, PORT_RADIUS + 2)
+            else:
+                label.setPos(-lw / 2, -lh - PORT_RADIUS - 2)
 
     def get_port_position(self, port_name: str) -> QPointF | None:
         """Get the position of a port in local coordinates."""

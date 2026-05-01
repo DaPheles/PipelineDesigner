@@ -64,7 +64,7 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "",
+        "code": "# On every rising clock edge:\n#   if rst = '1'  →  q <= (others => '0')\n#   else           →  q <= d\nreturn d",
         "port_types": {
             "clk": {
                 "kind": "std_logic",

@@ -4,11 +4,12 @@ from typing import Callable
 from uuid import UUID
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsSceneMouseEvent,
+    QGraphicsSimpleTextItem,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -166,6 +167,35 @@ class PortItem(QGraphicsEllipseItem):
             return
 
         super().mousePressEvent(event)
+
+    def add_label(self, comp_width_px: float, comp_height_px: float) -> None:
+        """Add the port name as a text label child, positioned inside the component.
+
+        Must be called *after* setPos() so self.pos() reflects the final position.
+        The label is non-interactive and stays behind the port circle.
+        """
+        label = QGraphicsSimpleTextItem(self._port.name, self)
+        label.setFont(QFont("sans-serif", 6))
+        label.setBrush(QColor("#ffffff"))
+        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, False)
+        label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        label.setZValue(-1)
+
+        r  = self.PORT_RADIUS
+        br = label.boundingRect()
+        lw, lh = br.width(), br.height()
+
+        x, y = self.pos().x(), self.pos().y()
+        tol  = r + 4  # tolerance to classify a port as on an edge
+
+        if x < tol:                       # left edge → label to the right
+            label.setPos(r + 3, -lh / 2)
+        elif x > comp_width_px - tol:     # right edge → label to the left
+            label.setPos(-lw - r - 3, -lh / 2)
+        elif y < tol:                     # top edge → label below
+            label.setPos(-lw / 2, r + 2)
+        else:                             # bottom edge → label above
+            label.setPos(-lw / 2, -lh - r - 2)
 
     def paint(
         self,

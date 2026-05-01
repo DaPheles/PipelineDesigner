@@ -269,6 +269,7 @@ class ComponentItem(QGraphicsRectItem):
                     y_px = self._calculate_auto_port_y(idx, len(output_ports), height_units)
 
             port_item.setPos(x_px, y_px)
+            port_item.add_label(rect.width(), rect.height())
             self._port_items[port.name] = port_item
 
     def _calculate_composite_port_y(
