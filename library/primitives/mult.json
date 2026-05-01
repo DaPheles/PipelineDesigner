@@ -6,42 +6,55 @@
         {
             "name": "a",
             "direction": "in",
-            "data_type": "std_logic_vector",
+            "data_type": "sfixed",
             "position": [
                 0,
                 2
             ],
             "is_clock": false,
-            "is_reset": false
+            "is_reset": false,
+            "vector_range": "A_WIDTH-1:0"
         },
         {
             "name": "b",
             "direction": "in",
-            "data_type": "std_logic_vector",
+            "data_type": "sfixed",
             "position": [
                 0,
                 4
             ],
             "is_clock": false,
-            "is_reset": false
+            "is_reset": false,
+            "vector_range": "B_WIDTH-1:0"
         },
         {
             "name": "prod",
             "direction": "out",
-            "data_type": "std_logic_vector",
+            "data_type": "sfixed",
             "position": [
                 5,
                 3
             ],
             "is_clock": false,
-            "is_reset": false
+            "is_reset": false,
+            "vector_range": "PROD_WITH-1:0"
         }
     ],
     "generics": [
         {
-            "name": "WIDTH",
+            "name": "A_WIDTH",
             "data_type": "integer",
-            "default_value": 8
+            "default_value": 18
+        },
+        {
+            "name": "B_WIDTH",
+            "data_type": "integer",
+            "default_value": 18
+        },
+        {
+            "name": "PRO_WIDTH",
+            "data_type": "integer",
+            "default_value": 48
         }
     ],
     "visual": {

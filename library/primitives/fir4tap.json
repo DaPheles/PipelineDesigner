@@ -6,31 +6,31 @@
     "ports": [
         {
             "name": "x0",
-            "direction": "IN",
+            "direction": "in",
             "data_type": "sfixed",
             "vector_range": "0:-15"
         },
         {
             "name": "x1",
-            "direction": "IN",
+            "direction": "in",
             "data_type": "sfixed",
             "vector_range": "0:-15"
         },
         {
             "name": "x2",
-            "direction": "IN",
+            "direction": "in",
             "data_type": "sfixed",
             "vector_range": "0:-15"
         },
         {
             "name": "x3",
-            "direction": "IN",
+            "direction": "in",
             "data_type": "sfixed",
             "vector_range": "0:-15"
         },
         {
             "name": "y",
-            "direction": "OUT",
+            "direction": "out",
             "data_type": "sfixed",
             "vector_range": "1:-15"
         }
