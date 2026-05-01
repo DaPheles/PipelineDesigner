@@ -11,9 +11,64 @@ MSB/LSB are strings to allow generic expressions (e.g. 'WIDTH-1', '-FRAC').
 Negative LSB means fractional bits (e.g. SFixed[7:-8] is 8.8 signed).
 """
 
+import ast
+import operator
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from fixedpoint import FPFormat
+
+
+# ── Safe integer-expression evaluator for MSB/LSB index strings ─────────────
+
+_ALLOWED_OPS = {
+    ast.Add:  operator.add,
+    ast.Sub:  operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div:  operator.floordiv,
+    ast.FloorDiv: operator.floordiv,
+    ast.USub: operator.neg,
+}
+
+
+def _eval_index(expr: str, generics: dict[str, int]) -> int:
+    """Evaluate an MSB/LSB index expression using only integer arithmetic.
+
+    Allowed: integer literals, names from *generics*, +, -, *, //, unary minus.
+    Raises ValueError for anything else (no builtins, no attribute access).
+    """
+    try:
+        tree = ast.parse(expr.strip(), mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"Cannot parse index expression {expr!r}: {exc}") from exc
+
+    def _visit(node: ast.AST) -> int:
+        if isinstance(node, ast.Expression):
+            return _visit(node.body)
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, int):
+                return node.value
+            raise ValueError(f"Non-integer constant {node.value!r} in expression {expr!r}")
+        if isinstance(node, ast.Name):
+            if node.id in generics:
+                return int(generics[node.id])
+            raise ValueError(f"Unknown name {node.id!r} in expression {expr!r}; provide it via generics=")
+        if isinstance(node, ast.UnaryOp):
+            op_fn = _ALLOWED_OPS.get(type(node.op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported unary operator in {expr!r}")
+            return op_fn(_visit(node.operand))
+        if isinstance(node, ast.BinOp):
+            op_fn = _ALLOWED_OPS.get(type(node.op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported operator in {expr!r}")
+            return op_fn(_visit(node.left), _visit(node.right))
+        raise ValueError(f"Unsupported AST node {type(node).__name__} in expression {expr!r}")
+
+    return _visit(tree)
 
 
 class FixedPointKind(str, Enum):
@@ -80,6 +135,47 @@ class BehaviorPortType(BaseModel):
             FixedPointKind.BOOLEAN,
             FixedPointKind.INTEGER,
         )
+
+    def to_fpformat(self, generics: dict[str, int] | None = None) -> "FPFormat":
+        """Convert to a fixedpoint.FPFormat using ieee.fixed_pkg index rules.
+
+        ieee.fixed_pkg convention:
+          sfixed(M downto L)  →  int_bits = M + 1,  frac_bits = -L,  signed = True
+          ufixed(M downto L)  →  int_bits = M + 1,  frac_bits = -L,  signed = False
+
+        L ≤ 0 means the LSB is fractional (common case).
+        L > 0 would mean the integer part is further truncated (unusual).
+
+        For std_logic_vector the interpretation is unsigned with
+        int_bits = M + 1, frac_bits = 0 (all integer).
+
+        Raises TypeError if called on std_logic / boolean / integer kinds.
+        Raises ValueError if expressions cannot be evaluated (missing generics).
+        """
+        from fixedpoint import FPFormat  # late import — optional dependency
+
+        g = generics or {}
+
+        if self.kind in (FixedPointKind.STD_LOGIC, FixedPointKind.BOOLEAN, FixedPointKind.INTEGER):
+            raise TypeError(
+                f"to_fpformat() is not defined for kind={self.kind.value!r}; "
+                "it only applies to sfixed / ufixed / std_logic_vector."
+            )
+
+        M = _eval_index(self.msb, g)
+        L = _eval_index(self.lsb, g)
+
+        int_bits  = M + 1
+        frac_bits = -L          # positive when L is negative (fractional)
+        signed    = self.kind == FixedPointKind.SFIXED
+
+        if frac_bits < 0:
+            raise ValueError(
+                f"LSB index {L} yields negative frac_bits ({frac_bits}). "
+                "LSB must be ≤ 0 for fractional formats."
+            )
+
+        return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=signed)
 
 
 class ComponentBehavior(BaseModel):
