@@ -3,7 +3,7 @@
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsRectItem,
@@ -583,6 +583,28 @@ class ComponentItem(QGraphicsRectItem):
             font = QFont("Arial", 10, QFont.Weight.Bold)
             painter.setFont(font)
             painter.drawText(header_rect, Qt.AlignmentFlag.AlignCenter, name)
+
+        # Larger clock marker triangles on the component border
+        r = 10.0
+        clock_color = self.pen().color()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(clock_color))
+        for port_item in self._port_items.values():
+            if not port_item.get_port().is_clock:
+                continue
+            edge = port_item._edge
+            if edge == "none":
+                continue
+            cx, cy = port_item.pos().x(), port_item.pos().y()
+            if edge == "bottom":
+                pts = [QPointF(cx - r, cy), QPointF(cx, cy - r), QPointF(cx + r, cy)]
+            elif edge == "top":
+                pts = [QPointF(cx - r, cy), QPointF(cx, cy + r), QPointF(cx + r, cy)]
+            elif edge == "right":
+                pts = [QPointF(cx, cy - r), QPointF(cx - r, cy), QPointF(cx, cy + r)]
+            else:  # left
+                pts = [QPointF(cx, cy - r), QPointF(cx + r, cy), QPointF(cx, cy + r)]
+            painter.drawPolygon(QPolygonF(pts))
 
     def boundingRect(self) -> QRectF:
         """Return the bounding rectangle including selection padding."""

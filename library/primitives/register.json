@@ -19,7 +19,7 @@
             "direction": "in",
             "data_type": "std_logic",
             "position": [
-                2,
+                1,
                 0
             ],
             "is_clock": false,
@@ -64,7 +64,7 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "# On every rising clock edge:\n#   if rst = '1'  →  q <= (others => '0')\n#   else           →  q <= d\nreturn d",
+        "code": "# On every rising clock edge:\n#   if rst = '1'  \u2192  q <= (others => '0')\n#   else           \u2192  q <= d\nreturn d",
         "port_types": {
             "clk": {
                 "kind": "std_logic",

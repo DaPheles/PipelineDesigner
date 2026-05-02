@@ -37,6 +37,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsPolygonItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSceneMouseEvent,
@@ -213,6 +214,7 @@ class _PortHandle(QGraphicsEllipseItem):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._dragging:
             self._dragging = False
+            self._scene_ref._update_clock_marks()
             self._scene_ref.port_position_changed.emit(self._name, self._gx, self._gy)
         event.accept()
 
@@ -350,6 +352,7 @@ class _PrimitiveScene(QGraphicsScene):
         self._header_text: QGraphicsTextItem | None = None
         self._port_handles: dict[str, _PortHandle] = {}
         self._resize_handles: dict[str, _ResizeHandle] = {}
+        self._clock_marks: list[QGraphicsPolygonItem] = []
         self._auto_extended = False
 
     # ------------------------------------------------------------------
@@ -375,9 +378,11 @@ class _PrimitiveScene(QGraphicsScene):
         port_positions = self._compute_port_positions(comp.ports)
         self._auto_extended = (self._grid_w != orig_w or self._grid_h != orig_h)
 
+        self._clock_marks = []
         self._build_body()
         self._build_header()
         self._build_port_handles(comp.ports, port_positions)
+        self._update_clock_marks()
         self._build_resize_handles()
         self._refresh_scene_rect()
 
@@ -398,6 +403,8 @@ class _PrimitiveScene(QGraphicsScene):
 
         for handle in self._port_handles.values():
             handle.update_for_resize(old_w, old_h, new_w, new_h)
+
+        self._update_clock_marks()
 
         for handle in self._resize_handles.values():
             handle.refresh_position(new_w, new_h)
@@ -501,6 +508,34 @@ class _PrimitiveScene(QGraphicsScene):
                 self._grid_h += 1
             else:
                 self._grid_w += 1
+
+    def _update_clock_marks(self) -> None:
+        for mark in self._clock_marks:
+            self.removeItem(mark)
+        self._clock_marks.clear()
+        r = 10.0
+        border_color = QColor("#cccccc")  # matches _BODY_BORDER
+        for handle in self._port_handles.values():
+            if not handle._is_clock:
+                continue
+            cx, cy = handle.pos().x(), handle.pos().y()
+            pts = self._clock_triangle_pts(cx, cy, handle._edge, r)
+            mark = QGraphicsPolygonItem(QPolygonF(pts))
+            mark.setBrush(QBrush(border_color))
+            mark.setPen(Qt.PenStyle.NoPen)
+            mark.setZValue(3)  # above body and header, below port handles (z=5)
+            self.addItem(mark)
+            self._clock_marks.append(mark)
+
+    @staticmethod
+    def _clock_triangle_pts(cx: float, cy: float, edge: str, r: float) -> list[QPointF]:
+        if edge == "bottom":
+            return [QPointF(cx - r, cy), QPointF(cx, cy - r), QPointF(cx + r, cy)]
+        if edge == "top":
+            return [QPointF(cx - r, cy), QPointF(cx, cy + r), QPointF(cx + r, cy)]
+        if edge == "right":
+            return [QPointF(cx, cy - r), QPointF(cx - r, cy), QPointF(cx, cy + r)]
+        return [QPointF(cx, cy - r), QPointF(cx + r, cy), QPointF(cx, cy + r)]  # left
 
     def _build_resize_handles(self) -> None:
         for kind in ("right", "bottom", "corner"):
