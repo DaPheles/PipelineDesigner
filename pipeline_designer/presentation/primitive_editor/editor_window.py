@@ -293,7 +293,7 @@ class PrimitiveEditorWindow(QMainWindow):
         # Behavior tab
         self._behavior_editor.set_behavior(comp.behavior, comp.ports)
 
-        self._modified = False
+        self._modified = self._canvas.was_auto_extended()
         self._update_title()
         self._delete_act.setEnabled(True)
         self._rename_act.setEnabled(True)
@@ -474,10 +474,12 @@ class PrimitiveEditorWindow(QMainWindow):
         self._canvas.update_port_position(name, x, y)
 
     def _on_ports_changed(self) -> None:
-        """Port table edited — refresh behavior editor port list."""
+        """Port table edited — refresh behavior editor port list and canvas."""
         ports = self._port_table.get_ports()
         self._behavior_editor.refresh_ports(ports)
         self._mark_modified()
+        if self._current is not None:
+            self._canvas.set_component(self._collect_component())
 
     # ------------------------------------------------------------------
     # List selection

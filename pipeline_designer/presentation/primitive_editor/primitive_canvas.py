@@ -52,7 +52,8 @@ from PySide6.QtWidgets import (
 
 from pipeline_designer.domain.models import ComponentDefinition, Port, PortDirection
 
-CELL = 30  # pixels per grid unit
+CELL = 30       # pixels per grid unit
+HEADER_H = CELL  # title bar is 1 grid unit tall, matching main canvas convention
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +145,7 @@ class _PortHandle(QGraphicsEllipseItem):
             self._label.setPos(-lw / 2, -lh - r - 2)
 
     def update_for_resize(self, old_w: int, old_h: int, new_w: int, new_h: int) -> None:
-        """Clamp port position to the new component size."""
+        """Clamp port position to the new component size, keeping off corners."""
         if self._gx == old_w:
             self._gx = new_w
         elif self._gx > new_w:
@@ -154,6 +155,12 @@ class _PortHandle(QGraphicsEllipseItem):
             self._gy = new_h
         elif self._gy > new_h:
             self._gy = new_h
+
+        # Push off corners
+        if self._gx == 0 or self._gx == new_w:
+            self._gy = max(1, min(max(new_h - 1, 1), self._gy))
+        if self._gy == 0 or self._gy == new_h:
+            self._gx = max(1, min(max(new_w - 1, 1), self._gx))
 
         self._refresh_pos()
 
@@ -184,13 +191,17 @@ class _PortHandle(QGraphicsEllipseItem):
         w, h = self._scene_ref.grid_size()
 
         if self._edge == "left":
-            self._gx, self._gy = 0, max(0, min(h, round(sp.y() / CELL)))
+            self._gx = 0
+            self._gy = max(1, min(max(h - 1, 1), round(sp.y() / CELL)))
         elif self._edge == "right":
-            self._gx, self._gy = w, max(0, min(h, round(sp.y() / CELL)))
+            self._gx = w
+            self._gy = max(1, min(max(h - 1, 1), round(sp.y() / CELL)))
         elif self._edge == "top":
-            self._gx, self._gy = max(0, min(w, round(sp.x() / CELL))), 0
+            self._gx = max(1, min(max(w - 1, 1), round(sp.x() / CELL)))
+            self._gy = 0
         elif self._edge == "bottom":
-            self._gx, self._gy = max(0, min(w, round(sp.x() / CELL))), h
+            self._gx = max(1, min(max(w - 1, 1), round(sp.x() / CELL)))
+            self._gy = h
 
         self._refresh_pos()
         event.accept()
@@ -306,10 +317,14 @@ class _PrimitiveScene(QGraphicsScene):
         self._grid_w = 4
         self._grid_h = 4
         self._body_color = QColor("#4a90d9")
+        self._comp_name = ""
 
         self._body: QGraphicsRectItem | None = None
+        self._header: QGraphicsRectItem | None = None
+        self._header_text: QGraphicsTextItem | None = None
         self._port_handles: dict[str, _PortHandle] = {}
         self._resize_handles: dict[str, _ResizeHandle] = {}
+        self._auto_extended = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -322,15 +337,26 @@ class _PrimitiveScene(QGraphicsScene):
         self.clear()
         self._port_handles = {}
         self._resize_handles = {}
+        self._header = None
+        self._header_text = None
 
         self._grid_w = comp.visual.width
         self._grid_h = comp.visual.height
         self._body_color = QColor(comp.visual.color)
+        self._comp_name = comp.name
+
+        orig_w, orig_h = self._grid_w, self._grid_h
+        port_positions = self._compute_port_positions(comp.ports)
+        self._auto_extended = (self._grid_w != orig_w or self._grid_h != orig_h)
 
         self._build_body()
-        self._build_port_handles(comp.ports)
+        self._build_header()
+        self._build_port_handles(comp.ports, port_positions)
         self._build_resize_handles()
         self._refresh_scene_rect()
+
+    def was_auto_extended(self) -> bool:
+        return self._auto_extended
 
     def apply_resize(self, new_w: int, new_h: int) -> None:
         """Update scene to reflect a new component size (from drag)."""
@@ -339,6 +365,10 @@ class _PrimitiveScene(QGraphicsScene):
 
         if self._body:
             self._body.setRect(0, 0, _px(new_w), _px(new_h))
+
+        if self._header:
+            self._header.setRect(0, 0, _px(new_w), float(HEADER_H))
+            self._reposition_header_text()
 
         for handle in self._port_handles.values():
             handle.update_for_resize(old_w, old_h, new_w, new_h)
@@ -370,12 +400,81 @@ class _PrimitiveScene(QGraphicsScene):
         self._body.setZValue(0)
         self.addItem(self._body)
 
-    def _build_port_handles(self, ports: list[Port]) -> None:
+    def _build_header(self) -> None:
+        header_color = self._body_color.darker(130)
+        self._header = QGraphicsRectItem(0, 0, _px(self._grid_w), float(HEADER_H))
+        self._header.setBrush(QBrush(header_color))
+        self._header.setPen(Qt.PenStyle.NoPen)
+        self._header.setZValue(1)
+        self.addItem(self._header)
+
+        self._header_text = QGraphicsTextItem(self._comp_name)
+        font = QFont("Arial", 8, QFont.Weight.Bold)
+        self._header_text.setFont(font)
+        self._header_text.setDefaultTextColor(QColor("#ffffff"))
+        self._header_text.setZValue(2)
+        self._reposition_header_text()
+        self.addItem(self._header_text)
+
+    def _reposition_header_text(self) -> None:
+        if self._header_text is None:
+            return
+        br = self._header_text.boundingRect()
+        self._header_text.setPos(
+            (_px(self._grid_w) - br.width()) / 2,
+            (HEADER_H - br.height()) / 2,
+        )
+
+    def _build_port_handles(self, ports: list[Port], positions: dict[str, tuple[int, int]]) -> None:
         for port in ports:
-            gx, gy = port.position if port.position else (0, self._grid_h // 2)
+            gx, gy = positions[port.name]
             handle = _PortHandle(port.name, gx, gy, port.direction, self)
             self.addItem(handle)
             self._port_handles[port.name] = handle
+
+    def _compute_port_positions(self, ports: list[Port]) -> dict[str, tuple[int, int]]:
+        positions: dict[str, tuple[int, int]] = {}
+        taken: set[tuple[int, int]] = set()
+        for port in ports:
+            if port.position is not None:
+                positions[port.name] = port.position
+                taken.add(port.position)
+        for port in ports:
+            if port.position is None:
+                pos = self._auto_assign_position(port, taken)
+                positions[port.name] = pos
+                taken.add(pos)
+        return positions
+
+    def _port_border(self, port: Port) -> str:
+        if port.is_clock:
+            return "bottom"
+        if port.is_reset:
+            return "top"
+        if port.direction == PortDirection.IN:
+            return "left"
+        return "right"
+
+    def _find_free_on_border(self, border: str, taken: set) -> tuple[int, int] | None:
+        w, h = self._grid_w, self._grid_h
+        if border == "left":
+            return next(((0, y) for y in range(1, h) if (0, y) not in taken), None)
+        if border == "right":
+            return next(((w, y) for y in range(1, h) if (w, y) not in taken), None)
+        if border == "top":
+            return next(((x, 0) for x in range(1, w) if (x, 0) not in taken), None)
+        return next(((x, h) for x in range(1, w) if (x, h) not in taken), None)
+
+    def _auto_assign_position(self, port: Port, taken: set) -> tuple[int, int]:
+        border = self._port_border(port)
+        while True:
+            pos = self._find_free_on_border(border, taken)
+            if pos is not None:
+                return pos
+            if border in ("left", "right"):
+                self._grid_h += 1
+            else:
+                self._grid_w += 1
 
     def _build_resize_handles(self) -> None:
         for kind in ("right", "bottom", "corner"):
@@ -487,10 +586,15 @@ class PrimitiveCanvas(QWidget):
         """Load a ComponentDefinition into the canvas."""
         self._scene.set_component(comp)
         self._spin_updating = True
-        self._w_spin.setValue(comp.visual.width)
-        self._h_spin.setValue(comp.visual.height)
+        w, h = self._scene.grid_size()  # may differ from comp if auto-extended
+        self._w_spin.setValue(w)
+        self._h_spin.setValue(h)
         self._spin_updating = False
         self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def was_auto_extended(self) -> bool:
+        """Return True if the last set_component auto-extended the grid size."""
+        return self._scene.was_auto_extended()
 
     def update_port_position(self, name: str, x: int, y: int) -> None:
         """Move a port handle to (x, y) in grid units (called from port table)."""
