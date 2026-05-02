@@ -3,8 +3,8 @@
 from typing import Callable
 from uuid import UUID
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -53,6 +53,7 @@ class PortItem(QGraphicsEllipseItem):
         self._is_hovered = False
         self._is_connection_target = False
         self._is_valid_target = False
+        self._edge = "none"  # set by add_label; used to orient the clock triangle
 
         # Callback for connection start (from output ports)
         self.on_connection_start: Callable[[], None] | None = None
@@ -189,13 +190,34 @@ class PortItem(QGraphicsEllipseItem):
         tol  = r + 4  # tolerance to classify a port as on an edge
 
         if x < tol:                       # left edge → label to the right
+            self._edge = "left"
             label.setPos(r + 3, -lh / 2)
         elif x > comp_width_px - tol:     # right edge → label to the left
+            self._edge = "right"
             label.setPos(-lw - r - 3, -lh / 2)
         elif y < tol:                     # top edge → label below
+            self._edge = "top"
             label.setPos(-lw / 2, r + 2)
         else:                             # bottom edge → label above
+            self._edge = "bottom"
             label.setPos(-lw / 2, -lh - r - 2)
+
+    def _clock_triangle(self) -> QPolygonF:
+        """Return a triangle polygon pointing into the component for a clock port.
+
+        Triangle shape from user spec (-0.5,0), (0,+0.5), (+0.5,0) (y-up math coords),
+        rotated to point inward based on which edge the port sits on.
+        """
+        r = self.PORT_RADIUS
+        if self._edge == "bottom":   # apex points up (into component)
+            pts = [QPointF(-r, 0.0), QPointF(0.0, -r), QPointF(r, 0.0)]
+        elif self._edge == "top":    # apex points down
+            pts = [QPointF(-r, 0.0), QPointF(0.0,  r), QPointF(r, 0.0)]
+        elif self._edge == "right":  # apex points left
+            pts = [QPointF(0.0, -r), QPointF(-r, 0.0), QPointF(0.0,  r)]
+        else:                        # left (default) — apex points right
+            pts = [QPointF(0.0, -r), QPointF( r, 0.0), QPointF(0.0,  r)]
+        return QPolygonF(pts)
 
     def paint(
         self,
@@ -205,4 +227,10 @@ class PortItem(QGraphicsEllipseItem):
     ) -> None:
         """Paint the port item."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        super().paint(painter, option, widget)
+        if self._port.is_clock:
+            color = self._get_port_color()
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(color.darker(150), 2))
+            painter.drawPolygon(self._clock_triangle())
+        else:
+            super().paint(painter, option, widget)

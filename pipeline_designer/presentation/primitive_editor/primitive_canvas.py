@@ -33,7 +33,7 @@ Port handles
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -90,6 +90,7 @@ class _PortHandle(QGraphicsEllipseItem):
         gy: int,
         direction: PortDirection,
         scene: "_PrimitiveScene",
+        is_clock: bool = False,
     ) -> None:
         r = self.RADIUS
         super().__init__(-r, -r, 2 * r, 2 * r)
@@ -97,6 +98,7 @@ class _PortHandle(QGraphicsEllipseItem):
         self._gx = gx
         self._gy = gy
         self._direction = direction
+        self._is_clock = is_clock
         self._scene_ref = scene
         self._dragging = False
         self._edge: str = "none"
@@ -127,7 +129,9 @@ class _PortHandle(QGraphicsEllipseItem):
 
     def _refresh_pos(self) -> None:
         self.setPos(_px(self._gx), _px(self._gy))
+        self._edge = self._detect_edge()
         self._reposition_label()
+        self.update()
 
     def _reposition_label(self) -> None:
         w, h = self._scene_ref.grid_size()
@@ -220,6 +224,28 @@ class _PortHandle(QGraphicsEllipseItem):
         color = self._COLORS.get(self._direction, QColor("#888888"))
         self.setPen(QPen(color.darker(150), 1.5))
         super().hoverLeaveEvent(event)
+
+    def paint(self, painter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._is_clock:
+            color = self._COLORS.get(self._direction, QColor("#888888"))
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(color.darker(150), 1.5))
+            painter.drawPolygon(self._clock_triangle())
+        else:
+            super().paint(painter, option, widget)
+
+    def _clock_triangle(self) -> QPolygonF:
+        r = self.RADIUS
+        if self._edge == "bottom":
+            pts = [QPointF(-r, 0.0), QPointF(0.0, -r), QPointF(r, 0.0)]
+        elif self._edge == "top":
+            pts = [QPointF(-r, 0.0), QPointF(0.0,  r), QPointF(r, 0.0)]
+        elif self._edge == "right":
+            pts = [QPointF(0.0, -r), QPointF(-r, 0.0), QPointF(0.0,  r)]
+        else:  # left or none — default
+            pts = [QPointF(0.0, -r), QPointF( r, 0.0), QPointF(0.0,  r)]
+        return QPolygonF(pts)
 
 
 class _ResizeHandle(QGraphicsRectItem):
@@ -428,7 +454,7 @@ class _PrimitiveScene(QGraphicsScene):
     def _build_port_handles(self, ports: list[Port], positions: dict[str, tuple[int, int]]) -> None:
         for port in ports:
             gx, gy = positions[port.name]
-            handle = _PortHandle(port.name, gx, gy, port.direction, self)
+            handle = _PortHandle(port.name, gx, gy, port.direction, self, is_clock=port.is_clock)
             self.addItem(handle)
             self._port_handles[port.name] = handle
 
