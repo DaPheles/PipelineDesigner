@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QDoubleSpinBox,
@@ -44,6 +46,9 @@ class PropertyEditor(QWidget):
     port_changed = Signal(object, str, str, object)
     # Emitted when an interface port property changes: (port_id, property_name, new_value)
     interface_port_changed = Signal(object, str, object)
+    # Emitted when the user requests rename or clone
+    rename_requested = Signal()
+    clone_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize the property editor.
@@ -84,6 +89,35 @@ class PropertyEditor(QWidget):
         """Set up the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Always-visible design header
+        design_header = QWidget()
+        design_header.setStyleSheet("background-color: #2d2d2d;")
+        header_layout = QHBoxLayout(design_header)
+        header_layout.setContentsMargins(8, 6, 8, 6)
+        header_layout.setSpacing(6)
+
+        self._design_name_label = QLabel("Untitled")
+        self._design_name_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        header_layout.addWidget(self._design_name_label, stretch=1)
+
+        rename_btn = QPushButton("Rename")
+        rename_btn.setFixedHeight(22)
+        rename_btn.clicked.connect(self.rename_requested)
+        header_layout.addWidget(rename_btn)
+
+        clone_btn = QPushButton("Clone")
+        clone_btn.setFixedHeight(22)
+        clone_btn.clicked.connect(self.clone_requested)
+        header_layout.addWidget(clone_btn)
+
+        layout.addWidget(design_header)
+
+        header_sep = QFrame()
+        header_sep.setFrameShape(QFrame.Shape.HLine)
+        header_sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(header_sep)
 
         # Scroll area for properties
         scroll = QScrollArea()
@@ -138,6 +172,10 @@ class PropertyEditor(QWidget):
     def clear(self) -> None:
         """Clear the property editor (public interface)."""
         self._show_empty()
+
+    def set_design_name(self, name: str) -> None:
+        """Update the design name shown in the header."""
+        self._design_name_label.setText(name)
 
     def set_component(
         self,

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QDockWidget,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -104,6 +105,20 @@ class PrimitiveEditorWindow(QMainWindow):
         save_act.setToolTip("Save current primitive (Ctrl+S)")
         save_act.triggered.connect(self._on_save)
         tb.addAction(save_act)
+
+        tb.addSeparator()
+
+        self._rename_act = QAction("Rename", self)
+        self._rename_act.setToolTip("Rename the current primitive")
+        self._rename_act.triggered.connect(self._on_rename)
+        self._rename_act.setEnabled(False)
+        tb.addAction(self._rename_act)
+
+        self._clone_act = QAction("Clone", self)
+        self._clone_act.setToolTip("Clone the current primitive with an auto-generated name")
+        self._clone_act.triggered.connect(self._on_clone)
+        self._clone_act.setEnabled(False)
+        tb.addAction(self._clone_act)
 
         tb.addSeparator()
 
@@ -281,6 +296,8 @@ class PrimitiveEditorWindow(QMainWindow):
         self._modified = False
         self._update_title()
         self._delete_act.setEnabled(True)
+        self._rename_act.setEnabled(True)
+        self._clone_act.setEnabled(True)
 
     # ------------------------------------------------------------------
     # Collect form → ComponentDefinition
@@ -390,6 +407,50 @@ class PrimitiveEditorWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Delete", f"Could not delete '{name}'.")
 
+    def _on_rename(self) -> None:
+        if self._current is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "Rename Primitive", "New name:", text=self._current.name
+        )
+        new_name = new_name.strip()
+        if not ok or not new_name or new_name == self._current.name:
+            return
+        if new_name in set(self._loader.get_primitive_names()):
+            QMessageBox.warning(self, "Rename", f"A primitive named '{new_name}' already exists.")
+            return
+        self._name_edit.blockSignals(True)
+        self._name_edit.setText(new_name)
+        self._name_edit.blockSignals(False)
+        comp = self._collect_component()
+        old_path = self._loader.get_primitive_file_path(self._current.name)
+        saved_path = self._loader.save_primitive(comp, old_path)
+        self._current = copy.deepcopy(comp)
+        self._modified = False
+        self._update_title()
+        self._populate_list()
+        self._select_by_name(new_name)
+        self._status.showMessage(f"Renamed to '{new_name}' → {saved_path}")
+        self.primitives_changed.emit()
+
+    def _on_clone(self) -> None:
+        if self._current is None:
+            return
+        existing = set(self._loader.get_primitive_names())
+        base = self._current.name
+        candidate = f"{base} Copy"
+        counter = 2
+        while candidate in existing:
+            candidate = f"{base} Copy {counter}"
+            counter += 1
+        clone = self._current.model_copy(update={"name": candidate})
+        saved_path = self._loader.save_primitive(clone)
+        self._load_component(clone)
+        self._populate_list()
+        self._select_by_name(candidate)
+        self._status.showMessage(f"Cloned as '{candidate}' → {saved_path}")
+        self.primitives_changed.emit()
+
     def _on_pick_color(self) -> None:
         color = QColorDialog.getColor(QColor(self._color), self, "Component color")
         if color.isValid():
@@ -458,6 +519,8 @@ class PrimitiveEditorWindow(QMainWindow):
         self._generic_table.set_generics([])
         self._port_table.set_ports([])
         self._delete_act.setEnabled(False)
+        self._rename_act.setEnabled(False)
+        self._clone_act.setEnabled(False)
         self._update_title()
 
     def _confirm_discard(self) -> bool:

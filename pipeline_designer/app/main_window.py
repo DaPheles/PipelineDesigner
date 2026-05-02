@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMenuBar,
     QMessageBox,
@@ -85,6 +86,8 @@ class MainWindow(QMainWindow):
         self._scene.selectionChanged.connect(self._on_selection_changed)
         self._property_editor.port_changed.connect(self._on_port_changed)
         self._property_editor.interface_port_changed.connect(self._on_interface_port_changed)
+        self._property_editor.rename_requested.connect(self._on_rename)
+        self._property_editor.clone_requested.connect(self._on_clone)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -114,6 +117,16 @@ class MainWindow(QMainWindow):
         save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
         save_as_action.triggered.connect(self._on_save_as)
         file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
+
+        rename_action = QAction("Re&name Design...", self)
+        rename_action.triggered.connect(self._on_rename)
+        file_menu.addAction(rename_action)
+
+        clone_action = QAction("&Clone Design", self)
+        clone_action.triggered.connect(self._on_clone)
+        file_menu.addAction(clone_action)
 
         file_menu.addSeparator()
 
@@ -168,7 +181,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Loaded {len(components)} components")
 
     def _update_title(self) -> None:
-        """Update the window title."""
+        """Update the window title and property panel header."""
         title = self._config.window.title
         design_name = self._scene.get_design().name
 
@@ -178,6 +191,7 @@ class MainWindow(QMainWindow):
             title = f"{design_name} - {title}"
 
         self.setWindowTitle(title)
+        self._property_editor.set_design_name(design_name)
 
     def _on_new(self) -> None:
         """Handle new design action."""
@@ -248,6 +262,39 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage(f"Saved to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+
+    def _on_rename(self) -> None:
+        """Rename the current design."""
+        design = self._scene.get_design()
+        new_name, ok = QInputDialog.getText(
+            self, "Rename Design", "Design name:", text=design.name
+        )
+        if ok and new_name.strip():
+            design.name = new_name.strip()
+            self._update_title()
+            self._status_bar.showMessage(f"Design renamed to '{design.name}'")
+
+    def _on_clone(self) -> None:
+        """Clone the current design with an auto-generated unique name."""
+        design = self._scene.get_design()
+        existing_names = {c.name for c in self._library_loader.get_all_components()}
+        existing_names.add(design.name)
+
+        base = design.name
+        candidate = f"{base} Copy"
+        counter = 2
+        while candidate in existing_names:
+            candidate = f"{base} Copy {counter}"
+            counter += 1
+
+        json_str = design.model_dump_json()
+        clone = Design.model_validate_json(json_str)
+        clone.name = candidate
+
+        self._scene.set_design(clone)
+        self._current_file = None
+        self._update_title()
+        self._status_bar.showMessage(f"Cloned design as '{candidate}'")
 
     def _on_zoom_changed(self, zoom: float) -> None:
         """Handle zoom level changes."""
