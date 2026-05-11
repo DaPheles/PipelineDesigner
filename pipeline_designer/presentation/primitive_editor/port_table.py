@@ -1,11 +1,14 @@
 """Port table widget for the primitive editor."""
 
+from __future__ import annotations
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -16,48 +19,63 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline_designer.domain.models import Port, PortDirection
+from pipeline_designer.domain.models.behavior import SignalKind, SignalType
 
-_COMMON_TYPES = [
-    "std_logic",
-    "std_logic_vector",
-    "unsigned",
-    "signed",
-    "sfixed",
-    "ufixed",
-    "integer",
-    "natural",
-    "positive",
-    "boolean",
+# Ordered list of concrete kind choices shown in the combo.
+# Editable, so users can also type a generic name reference (e.g. "SIG_TYPE").
+_KIND_OPTIONS: list[str] = [
+    SignalKind.SIGNED.value,
+    SignalKind.UNSIGNED.value,
+    SignalKind.STD_LOGIC_VECTOR.value,
+    SignalKind.STD_ULOGIC_VECTOR.value,
+    SignalKind.STD_LOGIC.value,
+    SignalKind.STD_ULOGIC.value,
+    SignalKind.INTEGER.value,
+    SignalKind.BOOLEAN.value,
 ]
 
-_VECTOR_TYPES = frozenset(
-    {"std_logic_vector", "unsigned", "signed", "sfixed", "ufixed"}
-)
+# Kinds that carry no bit-width (width/lsb fields disabled)
+_SCALAR_KIND_VALUES: frozenset[str] = frozenset({
+    SignalKind.STD_LOGIC.value,
+    SignalKind.STD_ULOGIC.value,
+    SignalKind.INTEGER.value,
+    SignalKind.BOOLEAN.value,
+})
 
 
 class PortTable(QWidget):
     """Editable table of port definitions for a primitive component.
 
     Columns:
-        Name | Direction | Data Type | Range | X | Y | Clock | Reset
+        Name | Direction | Kind | Width | LSB | Notation | X | Y | Clk | Rst
 
-    Range is enabled only for vector-like data types.
-    X and Y spinboxes are the secondary position editors (primary = canvas drag).
+    Kind is a combo of ``SignalKind`` values and is editable so a type-generic
+    name (e.g. ``SIG_TYPE``) can be entered directly.
+
+    Width and LSB are disabled for scalar kinds (std_logic, integer, boolean).
+
+    Notation (e.g. ``S4.8``) is a read-only derived label, shown when both
+    Width and LSB resolve to concrete integers.
     """
 
     data_changed = Signal()
-    # Emitted when spinboxes change, so the canvas can sync: (port_name, x, y)
+    # (port_name, x, y) — emitted when spinbox position changes
     position_edited = Signal(str, int, int)
 
-    _COL_NAME = 0
-    _COL_DIR = 1
-    _COL_TYPE = 2
-    _COL_RANGE = 3
-    _COL_X = 4
-    _COL_Y = 5
-    _COL_CLK = 6
-    _COL_RST = 7
-    _HEADERS = ["Name", "Direction", "Data Type", "Range (MSB:LSB)", "X", "Y", "Clk", "Rst"]
+    _COL_NAME     = 0
+    _COL_DIR      = 1
+    _COL_KIND     = 2
+    _COL_WIDTH    = 3
+    _COL_LSB      = 4
+    _COL_NOTATION = 5
+    _COL_X        = 6
+    _COL_Y        = 7
+    _COL_CLK      = 8
+    _COL_RST      = 9
+    _HEADERS = [
+        "Name", "Direction", "Kind", "Width", "LSB",
+        "Notation", "X", "Y", "Clk", "Rst",
+    ]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -94,10 +112,12 @@ class PortTable(QWidget):
         self._table = QTableWidget(0, len(self._HEADERS))
         self._table.setHorizontalHeaderLabels(self._HEADERS)
         hdr = self._table.horizontalHeader()
-        hdr.setSectionResizeMode(self._COL_NAME, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(self._COL_RANGE, QHeaderView.ResizeMode.Stretch)
-        for col in (self._COL_DIR, self._COL_TYPE, self._COL_X, self._COL_Y,
-                    self._COL_CLK, self._COL_RST):
+        hdr.setSectionResizeMode(self._COL_NAME,     QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(self._COL_KIND,     QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(self._COL_WIDTH,    QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(self._COL_LSB,      QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(self._COL_NOTATION, QHeaderView.ResizeMode.ResizeToContents)
+        for col in (self._COL_DIR, self._COL_X, self._COL_Y, self._COL_CLK, self._COL_RST):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
@@ -106,10 +126,8 @@ class PortTable(QWidget):
 
     # ------------------------------------------------------------------
     # Public interface
-    # ------------------------------------------------------------------
 
     def set_ports(self, ports: list[Port]) -> None:
-        """Populate table from a list of Port objects."""
         self._syncing = True
         self._table.setRowCount(0)
         for port in ports:
@@ -117,16 +135,9 @@ class PortTable(QWidget):
         self._syncing = False
 
     def get_ports(self) -> list[Port]:
-        """Collect Port objects from the current table contents."""
-        ports = []
-        for row in range(self._table.rowCount()):
-            port = self._row_to_port(row)
-            if port is not None:
-                ports.append(port)
-        return ports
+        return [p for p in (self._row_to_port(r) for r in range(self._table.rowCount())) if p]
 
     def update_port_position(self, name: str, x: int, y: int) -> None:
-        """Update the X/Y spinboxes for *name* (called when canvas port is dragged)."""
         self._syncing = True
         for row in range(self._table.rowCount()):
             if self._get_name(row) == name:
@@ -137,19 +148,15 @@ class PortTable(QWidget):
 
     # ------------------------------------------------------------------
     # Private helpers
-    # ------------------------------------------------------------------
 
     def _append_row(self, port: Port | None = None) -> int:
         row = self._table.rowCount()
         self._table.insertRow(row)
 
         # Name
-        self._table.setItem(
-            row, self._COL_NAME, QTableWidgetItem(port.name if port else "port")
-        )
-        name_item = self._table.item(row, self._COL_NAME)
-        if name_item:
-            name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        name_item = QTableWidgetItem(port.name if port else "port")
+        name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._table.setItem(row, self._COL_NAME, name_item)
 
         # Direction
         dir_combo = QComboBox()
@@ -162,31 +169,43 @@ class PortTable(QWidget):
         dir_combo.currentIndexChanged.connect(self._emit_changed)
         self._table.setCellWidget(row, self._COL_DIR, dir_combo)
 
-        # Data type
-        type_combo = QComboBox()
-        type_combo.setEditable(True)
-        for t in _COMMON_TYPES:
-            type_combo.addItem(t)
-        if port:
-            idx = type_combo.findText(port.data_type)
-            if idx >= 0:
-                type_combo.setCurrentIndex(idx)
-            else:
-                type_combo.setCurrentText(port.data_type)
-        type_combo.currentTextChanged.connect(lambda text, r=row: self._on_type_changed(r, text))
-        self._table.setCellWidget(row, self._COL_TYPE, type_combo)
+        # Kind — editable combo so generic names can be typed
+        kind_combo = QComboBox()
+        kind_combo.setEditable(True)
+        for k in _KIND_OPTIONS:
+            kind_combo.addItem(k)
+        kind_val = port.signal_type.kind if port else SignalKind.STD_LOGIC.value
+        idx = kind_combo.findText(kind_val)
+        if idx >= 0:
+            kind_combo.setCurrentIndex(idx)
+        else:
+            kind_combo.setCurrentText(kind_val)
+        kind_combo.currentTextChanged.connect(lambda text, r=row: self._on_kind_changed(r, text))
+        self._table.setCellWidget(row, self._COL_KIND, kind_combo)
 
-        # Range
-        range_edit = QLineEdit()
-        range_edit.setPlaceholderText("7:0 or WIDTH-1:0")
-        if port and port.vector_range:
-            range_edit.setText(port.vector_range)
-        is_vector = port.data_type in _VECTOR_TYPES if port else False
-        range_edit.setEnabled(is_vector)
-        range_edit.textChanged.connect(self._emit_changed)
-        self._table.setCellWidget(row, self._COL_RANGE, range_edit)
+        # Width
+        width_edit = QLineEdit()
+        width_edit.setPlaceholderText("e.g. 8 or WIDTH")
+        width_edit.setFixedWidth(80)
+        width_edit.setText(port.signal_type.width if port else "1")
+        width_edit.textChanged.connect(lambda _, r=row: self._on_range_changed(r))
+        self._table.setCellWidget(row, self._COL_WIDTH, width_edit)
 
-        # X / Y position spinboxes
+        # LSB
+        lsb_edit = QLineEdit()
+        lsb_edit.setPlaceholderText("0 or -FRAC")
+        lsb_edit.setFixedWidth(70)
+        lsb_edit.setText(port.signal_type.lsb if port else "0")
+        lsb_edit.textChanged.connect(lambda _, r=row: self._on_range_changed(r))
+        self._table.setCellWidget(row, self._COL_LSB, lsb_edit)
+
+        # Notation (read-only label)
+        notation_lbl = QLabel()
+        notation_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        notation_lbl.setStyleSheet("color: #aaaaaa; font-size: 9pt;")
+        self._table.setCellWidget(row, self._COL_NOTATION, notation_lbl)
+
+        # X / Y position
         for col, val in (
             (self._COL_X, port.position[0] if port and port.position else 0),
             (self._COL_Y, port.position[1] if port and port.position else 0),
@@ -204,6 +223,8 @@ class PortTable(QWidget):
         ):
             self._table.setCellWidget(row, col, self._make_checkbox(flag))
 
+        # Initialise enabled/notation state
+        self._update_range_state(row, kind_val)
         return row
 
     def _make_checkbox(self, checked: bool) -> QWidget:
@@ -217,11 +238,35 @@ class PortTable(QWidget):
         layout.setAlignment(cb, Qt.AlignmentFlag.AlignCenter)
         return container
 
-    def _on_type_changed(self, row: int, text: str) -> None:
-        range_edit = self._table.cellWidget(row, self._COL_RANGE)
-        if isinstance(range_edit, QLineEdit):
-            range_edit.setEnabled(text in _VECTOR_TYPES)
+    def _on_kind_changed(self, row: int, text: str) -> None:
+        self._update_range_state(row, text)
         self._emit_changed()
+
+    def _on_range_changed(self, row: int) -> None:
+        kind = self._get_kind(row)
+        self._update_notation(row, kind)
+        self._emit_changed()
+
+    def _update_range_state(self, row: int, kind_text: str) -> None:
+        is_scalar = kind_text in _SCALAR_KIND_VALUES
+        for col in (self._COL_WIDTH, self._COL_LSB):
+            w = self._table.cellWidget(row, col)
+            if isinstance(w, QLineEdit):
+                w.setEnabled(not is_scalar)
+        self._update_notation(row, kind_text)
+
+    def _update_notation(self, row: int, kind_text: str) -> None:
+        lbl = self._table.cellWidget(row, self._COL_NOTATION)
+        if not isinstance(lbl, QLabel):
+            return
+        width_w = self._table.cellWidget(row, self._COL_WIDTH)
+        lsb_w   = self._table.cellWidget(row, self._COL_LSB)
+        if not isinstance(width_w, QLineEdit) or not isinstance(lsb_w, QLineEdit):
+            lbl.setText("")
+            return
+        st = SignalType(kind=kind_text, width=width_w.text() or "1", lsb=lsb_w.text() or "0")
+        notation = st.notation()
+        lbl.setText(notation or "")
 
     def _on_position_spin_changed(self, row: int) -> None:
         if self._syncing:
@@ -264,11 +309,14 @@ class PortTable(QWidget):
 
     # ------------------------------------------------------------------
     # Row accessors
-    # ------------------------------------------------------------------
 
     def _get_name(self, row: int) -> str:
         item = self._table.item(row, self._COL_NAME)
         return item.text().strip() if item else ""
+
+    def _get_kind(self, row: int) -> str:
+        w = self._table.cellWidget(row, self._COL_KIND)
+        return w.currentText() if isinstance(w, QComboBox) else SignalKind.STD_LOGIC.value
 
     def _get_spin(self, row: int, col: int) -> QSpinBox:
         return self._table.cellWidget(row, col)  # type: ignore[return-value]
@@ -285,25 +333,24 @@ class PortTable(QWidget):
         if not name:
             return None
 
-        dir_combo = self._table.cellWidget(row, self._COL_DIR)
-        type_combo = self._table.cellWidget(row, self._COL_TYPE)
-        range_edit = self._table.cellWidget(row, self._COL_RANGE)
+        dir_combo   = self._table.cellWidget(row, self._COL_DIR)
+        width_edit  = self._table.cellWidget(row, self._COL_WIDTH)
+        lsb_edit    = self._table.cellWidget(row, self._COL_LSB)
 
         direction = (
             PortDirection(dir_combo.currentText())
             if isinstance(dir_combo, QComboBox)
             else PortDirection.IN
         )
-        data_type = (
-            type_combo.currentText()
-            if isinstance(type_combo, QComboBox)
-            else "std_logic"
+        kind  = self._get_kind(row)
+        width = width_edit.text().strip() if isinstance(width_edit, QLineEdit) else "1"
+        lsb   = lsb_edit.text().strip()  if isinstance(lsb_edit,  QLineEdit) else "0"
+
+        signal_type = SignalType(
+            kind=kind,
+            width=width or "1",
+            lsb=lsb or "0",
         )
-        vector_range = (
-            range_edit.text().strip()
-            if isinstance(range_edit, QLineEdit) and range_edit.isEnabled()
-            else None
-        ) or None
 
         x = self._get_spin(row, self._COL_X).value()
         y = self._get_spin(row, self._COL_Y).value()
@@ -311,8 +358,7 @@ class PortTable(QWidget):
         return Port(
             name=name,
             direction=direction,
-            data_type=data_type,
-            vector_range=vector_range,
+            signal_type=signal_type,
             position=(x, y),
             is_clock=self._get_checkbox(row, self._COL_CLK),
             is_reset=self._get_checkbox(row, self._COL_RST),

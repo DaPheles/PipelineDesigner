@@ -6,48 +6,34 @@
         {
             "name": "clk",
             "direction": "in",
-            "data_type": "std_logic",
-            "position": [
-                2,
-                8
-            ],
+            "signal_type": {"kind": "std_logic"},
+            "position": [2, 8],
             "is_clock": true,
             "is_reset": false
         },
         {
             "name": "rst",
             "direction": "in",
-            "data_type": "std_logic",
-            "position": [
-                1,
-                0
-            ],
+            "signal_type": {"kind": "std_logic"},
+            "position": [1, 0],
             "is_clock": false,
             "is_reset": true
         },
         {
             "name": "d",
             "direction": "in",
-            "data_type": "std_logic_vector",
-            "position": [
-                0,
-                4
-            ],
+            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
+            "position": [0, 4],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "WIDTH-1:0"
+            "is_reset": false
         },
         {
             "name": "q",
             "direction": "out",
-            "data_type": "std_logic_vector",
-            "position": [
-                4,
-                4
-            ],
+            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
+            "position": [4, 4],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "WIDTH-1:0"
+            "is_reset": false
         }
     ],
     "generics": [
@@ -64,28 +50,6 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "# On every rising clock edge:\n#   if rst = '1'  \u2192  q <= (others => '0')\n#   else           \u2192  q <= d\nreturn d",
-        "port_types": {
-            "clk": {
-                "kind": "std_logic",
-                "msb": "",
-                "lsb": ""
-            },
-            "rst": {
-                "kind": "std_logic",
-                "msb": "",
-                "lsb": ""
-            },
-            "d": {
-                "kind": "std_logic_vector",
-                "msb": "",
-                "lsb": ""
-            },
-            "q": {
-                "kind": "std_logic_vector",
-                "msb": "",
-                "lsb": ""
-            }
-        }
+        "code": "# On every rising clock edge:\n#   if rst = '1'  →  q <= (others => '0')\n#   else           →  q <= d\nreturn d"
     }
 }

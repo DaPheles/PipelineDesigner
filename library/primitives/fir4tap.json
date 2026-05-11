@@ -6,62 +6,42 @@
         {
             "name": "x0",
             "direction": "in",
-            "data_type": "sfixed",
-            "position": [
-                0,
-                2
-            ],
+            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
+            "position": [0, 2],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "0:-15"
+            "is_reset": false
         },
         {
             "name": "x1",
             "direction": "in",
-            "data_type": "sfixed",
-            "position": [
-                0,
-                3
-            ],
+            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
+            "position": [0, 3],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "0:-15"
+            "is_reset": false
         },
         {
             "name": "x2",
             "direction": "in",
-            "data_type": "sfixed",
-            "position": [
-                0,
-                4
-            ],
+            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
+            "position": [0, 4],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "0:-15"
+            "is_reset": false
         },
         {
             "name": "x3",
             "direction": "in",
-            "data_type": "sfixed",
-            "position": [
-                0,
-                5
-            ],
+            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
+            "position": [0, 5],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "0:-15"
+            "is_reset": false
         },
         {
             "name": "y",
             "direction": "out",
-            "data_type": "sfixed",
-            "position": [
-                4,
-                4
-            ],
+            "signal_type": {"kind": "signed", "width": "17", "lsb": "-15"},
+            "position": [4, 4],
             "is_clock": false,
-            "is_reset": false,
-            "vector_range": "1:-15"
+            "is_reset": false
         }
     ],
     "generics": [],
@@ -72,33 +52,6 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "# Box-average FIR: multiply each tap by 0.25 then accumulate\ncoef_fmt = UFixed(0, -15)          # U1.15 \u2014 0.25 is exact\nout_fmt  = SFixed(1, -15)          # S2.15 \u2014 enough headroom for sum\nc = Const(coef_fmt, 0.25)\nm0 = (x0 * c).keep_full()\nm1 = (x1 * c).keep_full()\nm2 = (x2 * c).keep_full()\nm3 = (x3 * c).keep_full()\nacc = ((m0 + m1).keep_full() + (m2 + m3).keep_full()).keep_full()\nreturn acc.requantize(out_fmt, round='truncate', saturate='saturate')\n",
-        "port_types": {
-            "x0": {
-                "kind": "sfixed",
-                "msb": "0",
-                "lsb": "-15"
-            },
-            "x1": {
-                "kind": "sfixed",
-                "msb": "0",
-                "lsb": "-15"
-            },
-            "x2": {
-                "kind": "sfixed",
-                "msb": "0",
-                "lsb": "-15"
-            },
-            "x3": {
-                "kind": "sfixed",
-                "msb": "0",
-                "lsb": "-15"
-            },
-            "y": {
-                "kind": "sfixed",
-                "msb": "1",
-                "lsb": "-15"
-            }
-        }
+        "code": "# Box-average FIR: multiply each tap by 0.25 then accumulate\ncoef_fmt = Unsigned(0, -15)         # U1.15 — 0.25 is exact\nout_fmt  = Signed(1, -15)           # S2.15 — enough headroom for sum\nc = Const(coef_fmt, 0.25)\nm0 = (x0 * c).keep_full()\nm1 = (x1 * c).keep_full()\nm2 = (x2 * c).keep_full()\nm3 = (x3 * c).keep_full()\nacc = ((m0 + m1).keep_full() + (m2 + m3).keep_full()).keep_full()\nreturn acc.requantize(out_fmt, round='truncate', saturate='saturate')\n"
     }
 }

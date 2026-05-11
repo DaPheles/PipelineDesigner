@@ -1,49 +1,63 @@
-"""Functional behavior model for primitive components.
+"""Signal type and behavior models for primitive components.
 
-Uses a typed fixed-point number system so pseudo-code can describe
-numerical semantics in a way that later enables simulation.
+Signal type system
+------------------
+Each port carries a ``SignalType`` that encodes three orthogonal concerns:
 
-Fixed-point types mirror VHDL ieee.fixed_pkg:
-  SFixed[msb:lsb]  →  sfixed(msb downto lsb)
-  UFixed[msb:lsb]  →  ufixed(msb downto lsb)
+  kind   — what the bits represent (signed/unsigned/std_logic_vector/…).
+           Can be a concrete ``SignalKind`` value *or* the name of a
+           ``signal_kind`` generic so a single primitive works for multiple
+           numeric types.
 
-MSB/LSB are strings to allow generic expressions (e.g. 'WIDTH-1', '-FRAC').
-Negative LSB means fractional bits (e.g. SFixed[7:-8] is 8.8 signed).
+  width  — total bit count as an integer-arithmetic expression, possibly
+           referencing generic names (e.g. ``"WIDTH"`` or
+           ``"INT_BITS+FRAC_BITS"``).
+
+  lsb    — position of the least-significant bit; 0 for plain integers,
+           negative for fractional fixed-point (e.g. ``"-FRAC_BITS"``).
+           MSB is always derived: ``msb = width + lsb - 1``.
+
+VHDL mapping examples (signed = ieee.numeric_std.signed):
+  kind=signed,  width=12, lsb=-8  →  signed(3 downto -8)   (S4.8)
+  kind=unsigned, width=16, lsb=-8  →  unsigned(7 downto -8) (U8.8)
+  kind=std_logic_vector, width=8, lsb=0 →  std_logic_vector(7 downto 0)
+  kind=std_logic                        →  std_logic
 """
+
+from __future__ import annotations
 
 import ast
 import operator
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from fixedpoint import FPFormat
 
 
-# ── Safe integer-expression evaluator for MSB/LSB index strings ─────────────
+# ── Safe integer-expression evaluator ────────────────────────────────────────
 
 _ALLOWED_OPS = {
-    ast.Add:  operator.add,
-    ast.Sub:  operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div:  operator.floordiv,
+    ast.Add:      operator.add,
+    ast.Sub:      operator.sub,
+    ast.Mult:     operator.mul,
+    ast.Div:      operator.floordiv,
     ast.FloorDiv: operator.floordiv,
-    ast.USub: operator.neg,
+    ast.USub:     operator.neg,
 }
 
 
 def _eval_index(expr: str, generics: dict[str, int]) -> int:
-    """Evaluate an MSB/LSB index expression using only integer arithmetic.
+    """Evaluate a width/lsb expression using only integer arithmetic.
 
-    Allowed: integer literals, names from *generics*, +, -, *, //, unary minus.
-    Raises ValueError for anything else (no builtins, no attribute access).
+    Allowed: integer literals, names from *generics*, +, -, *, //, unary -.
     """
     try:
         tree = ast.parse(expr.strip(), mode="eval")
     except SyntaxError as exc:
-        raise ValueError(f"Cannot parse index expression {expr!r}: {exc}") from exc
+        raise ValueError(f"Cannot parse expression {expr!r}: {exc}") from exc
 
     def _visit(node: ast.AST) -> int:
         if isinstance(node, ast.Expression):
@@ -51,11 +65,13 @@ def _eval_index(expr: str, generics: dict[str, int]) -> int:
         if isinstance(node, ast.Constant):
             if isinstance(node.value, int):
                 return node.value
-            raise ValueError(f"Non-integer constant {node.value!r} in expression {expr!r}")
+            raise ValueError(f"Non-integer constant {node.value!r} in {expr!r}")
         if isinstance(node, ast.Name):
             if node.id in generics:
                 return int(generics[node.id])
-            raise ValueError(f"Unknown name {node.id!r} in expression {expr!r}; provide it via generics=")
+            raise ValueError(
+                f"Unknown name {node.id!r} in {expr!r}; provide it via generics="
+            )
         if isinstance(node, ast.UnaryOp):
             op_fn = _ALLOWED_OPS.get(type(node.op))
             if op_fn is None:
@@ -66,165 +82,206 @@ def _eval_index(expr: str, generics: dict[str, int]) -> int:
             if op_fn is None:
                 raise ValueError(f"Unsupported operator in {expr!r}")
             return op_fn(_visit(node.left), _visit(node.right))
-        raise ValueError(f"Unsupported AST node {type(node).__name__} in expression {expr!r}")
+        raise ValueError(
+            f"Unsupported AST node {type(node).__name__} in {expr!r}"
+        )
 
     return _visit(tree)
 
 
-class FixedPointKind(str, Enum):
-    """Number representation for behavior port type annotations."""
+# ── Signal kind ───────────────────────────────────────────────────────────────
 
-    SFIXED = "sfixed"
-    UFIXED = "ufixed"
-    STD_LOGIC_VECTOR = "std_logic_vector"
-    STD_LOGIC = "std_logic"
-    INTEGER = "integer"
-    BOOLEAN = "boolean"
+class SignalKind(str, Enum):
+    """Concrete VHDL signal type family."""
+
+    SIGNED            = "signed"             # ieee.numeric_std.signed
+    UNSIGNED          = "unsigned"           # ieee.numeric_std.unsigned
+    STD_LOGIC_VECTOR  = "std_logic_vector"
+    STD_ULOGIC_VECTOR = "std_ulogic_vector"
+    STD_LOGIC         = "std_logic"
+    STD_ULOGIC        = "std_ulogic"
+    INTEGER           = "integer"
+    BOOLEAN           = "boolean"
 
 
-class BehaviorPortType(BaseModel):
-    """Fixed-point type annotation for a single port."""
+# Kinds that do not carry a width/lsb range
+_SCALAR_KINDS: frozenset[SignalKind] = frozenset({
+    SignalKind.STD_LOGIC,
+    SignalKind.STD_ULOGIC,
+    SignalKind.INTEGER,
+    SignalKind.BOOLEAN,
+})
 
-    kind: FixedPointKind = Field(
-        default=FixedPointKind.STD_LOGIC_VECTOR,
-        description="Number representation kind",
-    )
-    msb: str = Field(
-        default="0",
-        description="MSB index — integer literal or generic expression e.g. 'WIDTH-1'",
-    )
-    lsb: str = Field(
-        default="0",
-        description="LSB index — may be negative for fractional bits e.g. '-FRAC'",
-    )
+# Kinds that have a binary point (can produce FPFormat)
+_FIXED_POINT_KINDS: frozenset[SignalKind] = frozenset({
+    SignalKind.SIGNED,
+    SignalKind.UNSIGNED,
+})
 
-    def to_vhdl_type(self) -> str:
-        """Return the VHDL type string."""
-        match self.kind:
-            case FixedPointKind.STD_LOGIC:
-                return "std_logic"
-            case FixedPointKind.BOOLEAN:
-                return "boolean"
-            case FixedPointKind.INTEGER:
-                return "integer"
-            case _:
-                return f"{self.kind.value}({self.msb} downto {self.lsb})"
+# Legacy name mapping for JSON backward compatibility
+_LEGACY_KIND_MAP: dict[str, str] = {
+    "sfixed": SignalKind.SIGNED.value,
+    "ufixed": SignalKind.UNSIGNED.value,
+    "slv":    SignalKind.STD_LOGIC_VECTOR.value,
+    # std_logic_vector, std_logic, integer, boolean, signed, unsigned: keep as-is
+}
 
-    def to_python_annotation(self) -> str:
-        """Return the Python pseudo-code type annotation string."""
-        match self.kind:
-            case FixedPointKind.STD_LOGIC:
+
+# ── SignalType ────────────────────────────────────────────────────────────────
+
+class SignalType(BaseModel):
+    """Complete type description for a single port.
+
+    ``kind`` is either a concrete ``SignalKind`` value (e.g. ``"signed"``) or
+    the name of a ``signal_kind`` generic (e.g. ``"SIG_TYPE"``), allowing a
+    single component definition to be instantiated with different numeric types.
+
+    ``width`` and ``lsb`` are integer-arithmetic expressions that may reference
+    generic names.  MSB is always derived: ``msb = width + lsb - 1``.
+    """
+
+    kind:  str = Field(default="std_logic", description="SignalKind value or type-generic name")
+    width: str = Field(default="1",         description="Total bit width (expression)")
+    lsb:   str = Field(default="0",         description="LSB position; negative → fractional bits")
+
+    def resolved_kind(self, generics: dict[str, Any] | None = None) -> SignalKind | None:
+        """Return a concrete ``SignalKind``, resolving a generic reference if needed."""
+        try:
+            return SignalKind(self.kind)
+        except ValueError:
+            val = (generics or {}).get(self.kind)
+            if val is not None:
+                try:
+                    return SignalKind(str(val))
+                except ValueError:
+                    pass
+            return None
+
+    def has_range(self, generics: dict[str, Any] | None = None) -> bool:
+        """True when this type carries a bit-width (not a scalar like std_logic)."""
+        k = self.resolved_kind(generics)
+        if k is None:
+            return True  # unresolved generic reference — assume it has a range
+        return k not in _SCALAR_KINDS
+
+    def msb_expr(self) -> str:
+        """MSB as a string expression derived from width and lsb."""
+        try:
+            msb = int(self.width) + int(self.lsb) - 1
+            return str(msb)
+        except ValueError:
+            if self.lsb == "0":
+                return f"({self.width})-1"
+            return f"({self.width})+({self.lsb})-1"
+
+    def notation(self, generics: dict[str, Any] | None = None) -> str | None:
+        """Return ``'S4.8'`` / ``'U4.8'`` notation when dimensions are concrete."""
+        k = self.resolved_kind(generics)
+        if k not in _FIXED_POINT_KINDS:
+            return None
+        try:
+            int_g = {
+                name: int(v)
+                for name, v in (generics or {}).items()
+                if isinstance(v, (int, float))
+            }
+            w = _eval_index(self.width, int_g)
+            l = _eval_index(self.lsb,  int_g)
+            int_bits  = w + l
+            frac_bits = -l
+            prefix = "S" if k == SignalKind.SIGNED else "U"
+            return f"{prefix}{int_bits}.{frac_bits}"
+        except (ValueError, KeyError):
+            return None
+
+    def to_vhdl_type(self, generics: dict[str, Any] | None = None) -> str:
+        """Return a VHDL type string, e.g. ``signed(3 downto -8)``."""
+        g = generics or {}
+        k = self.resolved_kind(g)
+        if k is None:
+            return "std_logic"
+        if k in _SCALAR_KINDS:
+            return k.value
+        int_g = {n: int(v) for n, v in g.items() if isinstance(v, (int, float))}
+        try:
+            w   = _eval_index(self.width, int_g)
+            l   = _eval_index(self.lsb,   int_g)
+            msb = w + l - 1
+            return f"{k.value}({msb} downto {l})"
+        except (ValueError, KeyError):
+            return f"{k.value}({self.msb_expr()} downto {self.lsb})"
+
+    def to_python_annotation(self, generics: dict[str, Any] | None = None) -> str:
+        """Return a pseudo-code type annotation for the behavior signature."""
+        g = generics or {}
+        k = self.resolved_kind(g)
+        kind_label = k.value if k else self.kind
+        match k:
+            case SignalKind.STD_LOGIC | SignalKind.STD_ULOGIC:
                 return "Bit"
-            case FixedPointKind.BOOLEAN:
+            case SignalKind.BOOLEAN:
                 return "bool"
-            case FixedPointKind.INTEGER:
+            case SignalKind.INTEGER:
                 return "int"
-            case FixedPointKind.STD_LOGIC_VECTOR:
-                return f"Bits[{self.msb}:{self.lsb}]"
-            case FixedPointKind.SFIXED:
-                return f"SFixed[{self.msb}:{self.lsb}]"
-            case FixedPointKind.UFIXED:
-                return f"UFixed[{self.msb}:{self.lsb}]"
+            case SignalKind.SIGNED:
+                return f"Signed[{self.msb_expr()}:{self.lsb}]"
+            case SignalKind.UNSIGNED:
+                return f"Unsigned[{self.msb_expr()}:{self.lsb}]"
             case _:
-                return "Any"
-
-    def has_range(self) -> bool:
-        """Return True if this kind carries MSB/LSB parameters."""
-        return self.kind not in (
-            FixedPointKind.STD_LOGIC,
-            FixedPointKind.BOOLEAN,
-            FixedPointKind.INTEGER,
-        )
+                if self.has_range(g):
+                    return f"{kind_label}[{self.msb_expr()}:{self.lsb}]"
+                return kind_label
 
     def to_fpformat(self, generics: dict[str, int] | None = None) -> "FPFormat":
-        """Convert to a fixedpoint.FPFormat using ieee.fixed_pkg index rules.
+        """Convert to a ``fixedpoint.FPFormat`` for simulation.
 
-        ieee.fixed_pkg convention:
-          sfixed(M downto L)  →  int_bits = M + 1,  frac_bits = -L,  signed = True
-          ufixed(M downto L)  →  int_bits = M + 1,  frac_bits = -L,  signed = False
-
-        L ≤ 0 means the LSB is fractional (common case).
-        L > 0 would mean the integer part is further truncated (unusual).
-
-        For std_logic_vector the interpretation is unsigned with
-        int_bits = M + 1, frac_bits = 0 (all integer).
-
-        Raises TypeError if called on std_logic / boolean / integer kinds.
-        Raises ValueError if expressions cannot be evaluated (missing generics).
+        Convention: ``signed(M downto L)`` → int_bits=M+1, frac_bits=-L.
+        Only valid for ``signed`` / ``unsigned`` kinds.
+        Raises ``TypeError`` for scalar kinds, ``ValueError`` for unresolvable
+        generic expressions.
         """
         from fixedpoint import FPFormat  # late import — optional dependency
 
         g = generics or {}
+        k = self.resolved_kind(g)
 
-        if self.kind in (FixedPointKind.STD_LOGIC, FixedPointKind.BOOLEAN, FixedPointKind.INTEGER):
+        if k is None:
             raise TypeError(
-                f"to_fpformat() is not defined for kind={self.kind.value!r}; "
-                "it only applies to sfixed / ufixed / std_logic_vector."
+                f"to_fpformat(): kind={self.kind!r} references an unresolved generic"
+            )
+        if k not in _FIXED_POINT_KINDS:
+            raise TypeError(
+                f"to_fpformat() is not defined for kind={k.value!r}; "
+                "only signed / unsigned carry a fixed-point format."
             )
 
-        M = _eval_index(self.msb, g)
-        L = _eval_index(self.lsb, g)
+        int_g = {n: int(v) for n, v in g.items() if isinstance(v, (int, float))}
+        w   = _eval_index(self.width, int_g)
+        l   = _eval_index(self.lsb,   int_g)
+        msb = w + l - 1
 
-        int_bits  = M + 1
-        frac_bits = -L          # positive when L is negative (fractional)
-        signed    = self.kind == FixedPointKind.SFIXED
-
+        int_bits  = msb + 1
+        frac_bits = -l
         if frac_bits < 0:
             raise ValueError(
-                f"LSB index {L} yields negative frac_bits ({frac_bits}). "
+                f"LSB index {l} yields negative frac_bits ({frac_bits}). "
                 "LSB must be ≤ 0 for fractional formats."
             )
+        return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=(k == SignalKind.SIGNED))
 
-        return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=signed)
 
+# ── ComponentBehavior ─────────────────────────────────────────────────────────
 
 class ComponentBehavior(BaseModel):
     """Python-like pseudo-code description of a component's function.
 
-    `code` is only the function *body* (indented lines).  The editor
-    auto-generates the signature from `port_types` and displays it as a
-    read-only header above the editable body.
-
-    Example for a saturating adder:
-        port_types = {
-            "a":   BehaviorPortType(kind=SFIXED, msb="WIDTH-1", lsb="0"),
-            "b":   BehaviorPortType(kind=SFIXED, msb="WIDTH-1", lsb="0"),
-            "sum": BehaviorPortType(kind=SFIXED, msb="WIDTH",   lsb="0"),
-        }
-        code = "return saturate(a + b, SFixed[WIDTH:0])"
+    ``code`` is only the function *body*.  The signature is derived at
+    display time from the port ``SignalType`` declarations.
     """
+
+    model_config = ConfigDict(extra="ignore")  # silently drop legacy port_types
 
     code: str = Field(
         default="",
         description="Function body in Python-like pseudo-code",
     )
-    port_types: dict[str, BehaviorPortType] = Field(
-        default_factory=dict,
-        description="Fixed-point type annotations keyed by port name",
-    )
-
-    def generate_signature(
-        self,
-        input_names: list[str],
-        output_names: list[str],
-    ) -> str:
-        """Build a Python def-line from the stored port type annotations."""
-        args = []
-        for name in input_names:
-            pt = self.port_types.get(name)
-            ann = pt.to_python_annotation() if pt else "Any"
-            args.append(f"{name}: {ann}")
-
-        if not output_names:
-            ret = "None"
-        elif len(output_names) == 1:
-            pt = self.port_types.get(output_names[0])
-            ret = pt.to_python_annotation() if pt else "Any"
-        else:
-            parts = []
-            for name in output_names:
-                pt = self.port_types.get(name)
-                parts.append(pt.to_python_annotation() if pt else "Any")
-            ret = f"tuple[{', '.join(parts)}]"
-
-        return f"def compute({', '.join(args)}) -> {ret}:"

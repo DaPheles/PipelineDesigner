@@ -74,11 +74,14 @@ class SimNamespace(dict):
     def __init__(self, extra: dict[str, Any] | None = None):
         super().__init__()
         self.update({
-            # type constructors
-            "SFixed": _sfixed,
-            "UFixed": _ufixed,
-            "Bits":   _bits,
-            "Const":  _const,
+            # type constructors (new names)
+            "Signed":  _sfixed,
+            "Unsigned": _ufixed,
+            "Bits":    _bits,
+            "Const":   _const,
+            # legacy aliases for backward compatibility with existing behavior code
+            "SFixed":  _sfixed,
+            "UFixed":  _ufixed,
             # raw types (useful for isinstance checks in behavior code)
             "FPFormat":          FPFormat,
             "FixedPointArray":   FixedPointArray,

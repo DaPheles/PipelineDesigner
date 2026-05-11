@@ -34,14 +34,12 @@ driven outputs after each ``step()``.
 
 from __future__ import annotations
 
-import textwrap
 from collections import deque
 from typing import Any
 from uuid import UUID
 
 import numpy as np
 
-from pipeline_designer.domain.models.behavior import FixedPointKind
 from pipeline_designer.domain.models.component import ComponentDefinition
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection
@@ -87,6 +85,8 @@ class DesignSimulator:
 
         # UUID → ComponentDefinition
         self._inst_def: dict[UUID, ComponentDefinition] = {}
+        # UUID → resolved generic values for each instance
+        self._inst_generics: dict[UUID, dict[str, Any]] = {}
         # UUIDs of register instances (two-phase semantics)
         self._regs: set[UUID] = set()
         # UUID → BehaviorExecutor (only for non-register instances)
@@ -125,6 +125,8 @@ class DesignSimulator:
                 )
             self._inst_def[inst.id] = defn
 
+            self._inst_generics[inst.id] = inst.generic_values or {}
+
             if self._is_register(defn):
                 self._regs.add(inst.id)
             else:
@@ -134,7 +136,7 @@ class DesignSimulator:
                 self._exec_input_ports[inst.id]  = in_ports
                 self._exec_output_ports[inst.id] = out_ports
 
-                generics = inst.generic_values or {}
+                generics = self._inst_generics[inst.id]
                 self._executors[inst.id] = BehaviorExecutor(
                     code_body=defn.behavior.code,
                     param_names=in_ports,
@@ -185,26 +187,27 @@ class DesignSimulator:
     def _infer_reg_zero(self, reg_id: UUID) -> SignalValue:
         """Return a zero signal value for a register's Q output.
 
-        Traces the Q output to a consumer component port, reads its
-        BehaviorPortType, and returns a zero FixedPointArray in that format.
-        Falls back to numpy float64(0.0) if the format is unavailable.
+        Traces Q to a consumer port, reads its SignalType, and quantizes 0.0
+        to that format.  Falls back to numpy float64(0.0) if unavailable.
         """
-        from fixedpoint import FPFormat  # late import — optional dep
-
-        # Find a connection driven by this register's Q output
         for (tgt_id, tgt_port), driver in self._drivers.items():
             src_id, src_port = driver
             if src_id != reg_id or src_port != "q":
                 continue
-            # tgt_id is the consumer; look up its BehaviorPortType
             if tgt_id == _IFACE or tgt_id not in self._inst_def:
                 continue
             consumer_defn = self._inst_def[tgt_id]
-            pt = consumer_defn.behavior.port_types.get(tgt_port)
-            if pt is None or not pt.has_range():
+            port = consumer_defn.get_port_by_name(tgt_port)
+            if port is None:
+                continue
+            generics = {
+                k: v for k, v in self._inst_generics.get(tgt_id, {}).items()
+                if isinstance(v, (int, float))
+            }
+            if not port.signal_type.has_range(generics):
                 continue
             try:
-                fmt = pt.to_fpformat()
+                fmt = port.signal_type.to_fpformat(generics)
                 return fmt.quantize(np.array(0.0))
             except Exception:
                 continue

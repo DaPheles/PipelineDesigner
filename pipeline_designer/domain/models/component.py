@@ -4,57 +4,83 @@ All sizes and positions are specified in grid units (integers).
 Grid units are converted to pixels using the GridConfig.
 """
 
+from __future__ import annotations
+
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from pipeline_designer.domain.grid import DEFAULT_GRID, GridConfig
-from pipeline_designer.domain.models.behavior import ComponentBehavior
+from pipeline_designer.domain.models.behavior import (
+    ComponentBehavior,
+    SignalKind,
+    SignalType,
+    _LEGACY_KIND_MAP,
+)
 
 
 class PortDirection(str, Enum):
     """Direction of a port on a component."""
 
-    IN = "in"
-    OUT = "out"
+    IN    = "in"
+    OUT   = "out"
     INOUT = "inout"
 
 
 class Port(BaseModel):
     """A port on a component definition.
 
-    Port positions are specified in grid units relative to the component's
-    top-left corner. This ensures ports always land on grid intersections.
+    Port positions are in grid units relative to the component's top-left
+    corner.  Signal type information lives entirely in ``signal_type``; the
+    old ``data_type`` / ``vector_range`` fields are accepted on load for
+    backward compatibility and converted transparently.
     """
 
-    name: str = Field(..., description="Port name")
-    direction: PortDirection = Field(..., description="Port direction")
-    data_type: str = Field(default="std_logic", description="Data type of the port")
-    position: tuple[int, int] | None = Field(
-        default=None,
-        description="Position in grid units (x, y) relative to component origin",
+    name:        str            = Field(..., description="Port name")
+    direction:   PortDirection  = Field(..., description="Port direction")
+    signal_type: SignalType     = Field(
+        default_factory=lambda: SignalType(kind="std_logic"),
+        description="Signal type (kind, width, lsb)",
     )
-    is_clock: bool = Field(default=False, description="Whether this is a clock port")
-    is_reset: bool = Field(default=False, description="Whether this is a reset port")
-    vector_range: str | None = Field(
-        default=None,
-        description=(
-            "Vector index range as 'MSB:LSB' (e.g. '7:0' or 'WIDTH-1:0'). "
-            "Only meaningful for std_logic_vector and similar array types. "
-            "Maps to VHDL: std_logic_vector(MSB downto LSB)."
-        ),
-    )
+    position:  tuple[int, int] | None = Field(default=None, description="Grid-unit position (x, y)")
+    is_clock:  bool = Field(default=False, description="Whether this is a clock port")
+    is_reset:  bool = Field(default=False, description="Whether this is a reset port")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, data: Any) -> Any:
+        """Convert old data_type / vector_range fields to signal_type."""
+        if not isinstance(data, dict) or "signal_type" in data:
+            return data
+
+        data = dict(data)  # don't mutate the original
+        raw_kind   = data.pop("data_type", "std_logic") or "std_logic"
+        raw_range  = data.pop("vector_range", None)
+
+        # Normalise legacy kind names
+        kind = _LEGACY_KIND_MAP.get(raw_kind, raw_kind)
+
+        if raw_range and ":" in str(raw_range):
+            parts    = str(raw_range).split(":", 1)
+            msb_str  = parts[0].strip()
+            lsb_str  = parts[1].strip()
+            try:
+                msb   = int(msb_str)
+                lsb   = int(lsb_str)
+                width = str(msb - lsb + 1)
+                lsb_s = str(lsb)
+            except ValueError:
+                # Generic expression — keep raw but compute width symbolically
+                width = f"({msb_str})-({lsb_str})+1"
+                lsb_s = lsb_str
+            data["signal_type"] = {"kind": kind, "width": width, "lsb": lsb_s}
+        else:
+            data["signal_type"] = {"kind": kind}
+
+        return data
 
     def get_pixel_position(self, grid: GridConfig | None = None) -> tuple[float, float]:
-        """Get the port position in pixels.
-
-        Args:
-            grid: Grid configuration. Uses DEFAULT_GRID if not provided.
-
-        Returns:
-            Position in pixels (x, y).
-        """
         if grid is None:
             grid = DEFAULT_GRID
         if self.position is None:
@@ -63,93 +89,66 @@ class Port(BaseModel):
 
 
 class Generic(BaseModel):
-    """A generic parameter for a component."""
+    """A generic parameter for a component.
 
-    name: str = Field(..., description="Generic parameter name")
-    data_type: str = Field(default="integer", description="Data type of the generic")
-    default_value: Any = Field(default=None, description="Default value for the generic")
+    Use ``data_type = "signal_kind"`` for generics whose value is a
+    ``SignalKind`` name (e.g. ``"signed"`` / ``"unsigned"``).  The port's
+    ``signal_type.kind`` field can then reference this generic by name.
+    """
+
+    name:          str = Field(..., description="Generic parameter name")
+    data_type:     str = Field(default="integer", description="Data type (integer, signal_kind, …)")
+    default_value: Any = Field(default=None, description="Default value")
 
 
 class VisualConfig(BaseModel):
-    """Visual configuration for a component.
+    """Visual configuration for a component (grid units)."""
 
-    Width and height are specified in grid units to ensure components
-    align properly on the grid.
-    """
-
-    width: int = Field(default=6, description="Width in grid units")
+    width:  int = Field(default=6, description="Width in grid units")
     height: int = Field(default=4, description="Height in grid units")
-    color: str = Field(default="#4a90d9", description="Background color (hex)")
+    color:  str = Field(default="#4a90d9", description="Background color (hex)")
 
     def get_pixel_size(self, grid: GridConfig | None = None) -> tuple[float, float]:
-        """Get the component size in pixels.
-
-        Args:
-            grid: Grid configuration. Uses DEFAULT_GRID if not provided.
-
-        Returns:
-            Size in pixels (width, height).
-        """
         if grid is None:
             grid = DEFAULT_GRID
         return (grid.to_pixels(self.width), grid.to_pixels(self.height))
 
 
 class ComponentDefinition(BaseModel):
-    """Definition of a reusable component type.
+    """Definition of a reusable component type."""
 
-    All sizes and positions are in grid units for consistent alignment.
-    """
-
-    name: str = Field(..., description="Component name")
-    category: str = Field(default="general", description="Component category")
-    description: str = Field(default="", description="Component description")
-    ports: list[Port] = Field(default_factory=list, description="List of ports")
-    generics: list[Generic] = Field(
-        default_factory=list, description="List of generic parameters"
-    )
-    visual: VisualConfig = Field(
-        default_factory=VisualConfig, description="Visual configuration"
-    )
-    latency: int = Field(default=0, description="Pipeline latency in clock cycles")
-    behavior: ComponentBehavior = Field(
-        default_factory=ComponentBehavior,
-        description="Functional pseudo-code description with typed fixed-point port annotations",
-    )
+    name:        str               = Field(..., description="Component name")
+    category:    str               = Field(default="general",  description="Component category")
+    description: str               = Field(default="",        description="Component description")
+    ports:       list[Port]        = Field(default_factory=list)
+    generics:    list[Generic]     = Field(default_factory=list)
+    visual:      VisualConfig      = Field(default_factory=VisualConfig)
+    latency:     int               = Field(default=0, description="Pipeline latency in cycles")
+    behavior:    ComponentBehavior = Field(default_factory=ComponentBehavior)
 
     def get_input_ports(self) -> list[Port]:
-        """Get all input ports."""
         return [p for p in self.ports if p.direction == PortDirection.IN]
 
     def get_output_ports(self) -> list[Port]:
-        """Get all output ports."""
         return [p for p in self.ports if p.direction == PortDirection.OUT]
 
     def get_port_by_name(self, name: str) -> Port | None:
-        """Get a port by name."""
         for port in self.ports:
             if port.name == name:
                 return port
         return None
 
     def validate_port_positions(self) -> list[str]:
-        """Validate that all port positions are within component bounds.
-
-        Returns:
-            List of validation error messages (empty if valid).
-        """
         errors = []
         for port in self.ports:
             if port.position is not None:
                 x, y = port.position
                 if x < 0 or x > self.visual.width:
                     errors.append(
-                        f"Port '{port.name}' x position {x} is outside "
-                        f"component width {self.visual.width}"
+                        f"Port '{port.name}' x={x} outside width {self.visual.width}"
                     )
                 if y < 0 or y > self.visual.height:
                     errors.append(
-                        f"Port '{port.name}' y position {y} is outside "
-                        f"component height {self.visual.height}"
+                        f"Port '{port.name}' y={y} outside height {self.visual.height}"
                     )
         return errors

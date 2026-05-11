@@ -1,7 +1,7 @@
 {
-    "name": "Mult",
+    "name": "Divider",
     "category": "primitives",
-    "description": "Multiplier. SIG_TYPE controls signed/unsigned interpretation.",
+    "description": "Pipelined divider. SIG_TYPE controls signed/unsigned interpretation.",
     "ports": [
         {
             "name": "a",
@@ -20,11 +20,19 @@
             "is_reset": false
         },
         {
-            "name": "prod",
+            "name": "q",
             "direction": "out",
-            "signal_type": {"kind": "SIG_TYPE", "width": "PROD_WIDTH", "lsb": "0"},
-            "position": [5, 3],
+            "signal_type": {"kind": "SIG_TYPE", "width": "Q_WIDTH", "lsb": "0"},
+            "position": [4, 3],
             "is_clock": false,
+            "is_reset": false
+        },
+        {
+            "name": "clk",
+            "direction": "in",
+            "signal_type": {"kind": "std_logic"},
+            "position": [2, 6],
+            "is_clock": true,
             "is_reset": false
         }
     ],
@@ -32,17 +40,17 @@
         {
             "name": "A_WIDTH",
             "data_type": "integer",
-            "default_value": 18
+            "default_value": 16
         },
         {
             "name": "B_WIDTH",
             "data_type": "integer",
-            "default_value": 18
+            "default_value": 8
         },
         {
-            "name": "PROD_WIDTH",
+            "name": "Q_WIDTH",
             "data_type": "integer",
-            "default_value": 36
+            "default_value": 8
         },
         {
             "name": "SIG_TYPE",
@@ -51,12 +59,12 @@
         }
     ],
     "visual": {
-        "width": 5,
+        "width": 4,
         "height": 6,
-        "color": "#2040f0"
+        "color": "#e01b24"
     },
-    "latency": 0,
+    "latency": 3,
     "behavior": {
-        "code": "return a * b"
+        "code": ""
     }
 }
