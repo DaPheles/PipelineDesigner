@@ -1,37 +1,36 @@
-"""Behavior editor widget: generated signature + editable code body.
+"""Behavior editor widget: generated signature + code body + simulation panel.
 
-The function signature is derived automatically from the port ``signal_type``
-declarations — no separate type annotation table is needed.  The editor shows
-the signature read-only above an editable code body.
+Layout (vertical splitter):
+  Top  — read-only generated signature + editable pseudo-code body
+  Bottom — multi-cycle Python-mode simulation panel
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QSizePolicy,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from pipeline_designer.domain.models import Port, PortDirection
+from pipeline_designer.domain.models import Generic, Port, PortDirection
 from pipeline_designer.domain.models.behavior import ComponentBehavior
+from .simulation_panel import SimulationPanel
 
 
 class BehaviorEditor(QWidget):
-    """Code-body editor for a component's behavior.
-
-    The function signature is read-only and derived from the current port list
-    via ``port.signal_type.to_python_annotation()``.
+    """Code-body editor for a component's behavior plus simulation panel.
 
     Usage::
 
         editor = BehaviorEditor()
-        editor.set_behavior(component.behavior, component.ports)
+        editor.set_behavior(component.behavior, component.ports, component.generics)
         behavior = editor.get_behavior()
     """
 
@@ -39,31 +38,40 @@ class BehaviorEditor(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._ports: list[Port] = []
+        self._ports:    list[Port]    = []
+        self._generics: list[Generic] = []
         self._setup_ui()
 
     # ------------------------------------------------------------------
     # UI construction
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # ── Top pane: signature + code ────────────────────────────────
+        top = QWidget()
+        top_layout = QVBoxLayout(top)
+        top_layout.setContentsMargins(4, 4, 4, 4)
+        top_layout.setSpacing(6)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        layout.addWidget(sep)
+        top_layout.addWidget(sep)
 
-        layout.addWidget(QLabel("Generated signature (derived from port declarations):"))
+        top_layout.addWidget(QLabel("Generated signature (derived from port declarations):"))
         self._signature_label = QLabel()
         self._signature_label.setFont(QFont("Monospace", 9))
         self._signature_label.setStyleSheet(
             "background: #1a1a2e; color: #a0c4ff; padding: 6px; border-radius: 4px;"
         )
         self._signature_label.setWordWrap(True)
-        layout.addWidget(self._signature_label)
+        top_layout.addWidget(self._signature_label)
 
-        layout.addWidget(QLabel("Functional pseudo-code (body only):"))
+        top_layout.addWidget(QLabel("Functional pseudo-code (body only):"))
         self._code_edit = QTextEdit()
         self._code_edit.setFont(QFont("Monospace", 10))
         self._code_edit.setPlaceholderText(
@@ -77,27 +85,51 @@ class BehaviorEditor(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._code_edit.textChanged.connect(self._on_changed)
-        layout.addWidget(self._code_edit)
+        top_layout.addWidget(self._code_edit)
+        splitter.addWidget(top)
+
+        # ── Bottom pane: simulation panel ─────────────────────────────
+        self._sim_panel = SimulationPanel(
+            behavior_getter=lambda: self._code_edit.toPlainText()
+        )
+        splitter.addWidget(self._sim_panel)
+
+        splitter.setSizes([300, 420])
+        root.addWidget(splitter)
 
     # ------------------------------------------------------------------
     # Public interface
 
-    def set_behavior(self, behavior: ComponentBehavior, ports: list[Port]) -> None:
-        """Populate from a ComponentBehavior and the current port list."""
-        self._ports = list(ports)
+    def set_behavior(
+        self,
+        behavior: ComponentBehavior,
+        ports: list[Port],
+        generics: list[Generic] | None = None,
+    ) -> None:
+        """Populate from a ComponentBehavior, port list, and optional generics."""
+        self._ports    = list(ports)
+        self._generics = list(generics or [])
         self._code_edit.blockSignals(True)
         self._code_edit.setPlainText(behavior.code)
         self._code_edit.blockSignals(False)
         self._refresh_signature()
+        self._sim_panel.set_context(self._ports, self._generics)
 
     def get_behavior(self) -> ComponentBehavior:
         """Collect a ComponentBehavior from the current UI state."""
         return ComponentBehavior(code=self._code_edit.toPlainText())
 
-    def refresh_ports(self, ports: list[Port]) -> None:
+    def refresh_ports(
+        self,
+        ports: list[Port],
+        generics: list[Generic] | None = None,
+    ) -> None:
         """Call when the port list changes — updates the derived signature."""
         self._ports = list(ports)
+        if generics is not None:
+            self._generics = list(generics)
         self._refresh_signature()
+        self._sim_panel.set_context(self._ports, self._generics)
 
     # ------------------------------------------------------------------
     # Private helpers

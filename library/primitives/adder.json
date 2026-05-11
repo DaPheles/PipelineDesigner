@@ -6,40 +6,75 @@
         {
             "name": "a",
             "direction": "in",
-            "signal_type": {"kind": "SIG_TYPE", "width": "WIDTH", "lsb": "0"},
-            "position": [0, 2],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                2
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "b",
             "direction": "in",
-            "signal_type": {"kind": "SIG_TYPE", "width": "WIDTH", "lsb": "0"},
-            "position": [0, 4],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                4
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "cin",
             "direction": "in",
-            "signal_type": {"kind": "std_logic"},
-            "position": [0, 5],
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                5
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "sum",
             "direction": "out",
-            "signal_type": {"kind": "SIG_TYPE", "width": "WIDTH+1", "lsb": "0"},
-            "position": [5, 3],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "WIDTH+1",
+                "lsb": "0"
+            },
+            "position": [
+                5,
+                3
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "cout",
             "direction": "out",
-            "signal_type": {"kind": "std_logic"},
-            "position": [5, 5],
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                5,
+                5
+            ],
             "is_clock": false,
             "is_reset": false
         }
@@ -63,6 +98,6 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\nreturn total"
+        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\ncout = total >> WIDTH\nreturn total, cout"
     }
 }
