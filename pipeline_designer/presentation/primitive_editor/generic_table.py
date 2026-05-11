@@ -54,8 +54,18 @@ class GenericTable(QWidget):
         del_btn = QPushButton("− Remove")
         del_btn.setFixedWidth(80)
         del_btn.clicked.connect(self._on_remove)
+        up_btn = QPushButton("↑")
+        up_btn.setFixedWidth(30)
+        up_btn.setToolTip("Move selected generic up")
+        up_btn.clicked.connect(lambda: self._move_row(-1))
+        down_btn = QPushButton("↓")
+        down_btn.setFixedWidth(30)
+        down_btn.setToolTip("Move selected generic down")
+        down_btn.clicked.connect(lambda: self._move_row(1))
         btn_row.addWidget(add_btn)
         btn_row.addWidget(del_btn)
+        btn_row.addWidget(up_btn)
+        btn_row.addWidget(down_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -124,6 +134,22 @@ class GenericTable(QWidget):
             else ""
         )
         self._table.setItem(row, self._COL_DEFAULT, QTableWidgetItem(default_text))
+
+    def _move_row(self, direction: int) -> None:
+        rows = sorted({idx.row() for idx in self._table.selectedIndexes()})
+        if not rows:
+            return
+        row = rows[0]
+        target = row + direction
+        if target < 0 or target >= self._table.rowCount():
+            return
+        generics = self.get_generics()
+        generics[row], generics[target] = generics[target], generics[row]
+        self._table.blockSignals(True)
+        self.set_generics(generics)
+        self._table.blockSignals(False)
+        self._table.selectRow(target)
+        self.data_changed.emit()
 
     def _on_add(self) -> None:
         self._append_row()

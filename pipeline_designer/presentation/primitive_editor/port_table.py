@@ -76,8 +76,18 @@ class PortTable(QWidget):
         del_btn = QPushButton("− Remove")
         del_btn.setFixedWidth(80)
         del_btn.clicked.connect(self._on_remove)
+        up_btn = QPushButton("↑")
+        up_btn.setFixedWidth(30)
+        up_btn.setToolTip("Move selected port up")
+        up_btn.clicked.connect(lambda: self._move_row(-1))
+        down_btn = QPushButton("↓")
+        down_btn.setFixedWidth(30)
+        down_btn.setToolTip("Move selected port down")
+        down_btn.clicked.connect(lambda: self._move_row(1))
         btn_row.addWidget(add_btn)
         btn_row.addWidget(del_btn)
+        btn_row.addWidget(up_btn)
+        btn_row.addWidget(down_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -220,6 +230,20 @@ class PortTable(QWidget):
         x = self._get_spin(row, self._COL_X).value()
         y = self._get_spin(row, self._COL_Y).value()
         self.position_edited.emit(name, x, y)
+        self._emit_changed()
+
+    def _move_row(self, direction: int) -> None:
+        rows = sorted({idx.row() for idx in self._table.selectedIndexes()})
+        if not rows:
+            return
+        row = rows[0]
+        target = row + direction
+        if target < 0 or target >= self._table.rowCount():
+            return
+        ports = self.get_ports()
+        ports[row], ports[target] = ports[target], ports[row]
+        self.set_ports(ports)
+        self._table.selectRow(target)
         self._emit_changed()
 
     def _on_add(self) -> None:
