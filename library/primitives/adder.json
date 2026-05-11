@@ -26,12 +26,23 @@
             "is_reset": false
         },
         {
+            "name": "cin",
+            "direction": "in",
+            "data_type": "std_logic",
+            "position": [
+                0,
+                5
+            ],
+            "is_clock": false,
+            "is_reset": false
+        },
+        {
             "name": "sum",
             "direction": "out",
             "data_type": "std_logic_vector",
             "position": [
                 5,
-                2
+                3
             ],
             "is_clock": false,
             "is_reset": false
@@ -42,7 +53,7 @@
             "data_type": "std_logic",
             "position": [
                 5,
-                4
+                5
             ],
             "is_clock": false,
             "is_reset": false
@@ -62,7 +73,7 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "",
+        "code": "sum_ = a + b + cin\nsum = sum_ & ((1 << (msb-lsb))-1)\ncout = sum_ >> msb",
         "port_types": {
             "a": {
                 "kind": "sfixed",
@@ -70,6 +81,11 @@
                 "lsb": ""
             },
             "b": {
+                "kind": "sfixed",
+                "msb": "",
+                "lsb": ""
+            },
+            "cin": {
                 "kind": "sfixed",
                 "msb": "",
                 "lsb": ""
