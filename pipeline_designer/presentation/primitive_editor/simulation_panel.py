@@ -319,7 +319,7 @@ class SimulationPanel(QWidget):
         # user clicks Simulate → results shown in waveform view
     """
 
-    DEFAULT_CYCLES = 10
+    DEFAULT_CYCLES = 1
 
     def __init__(
         self,
@@ -507,17 +507,29 @@ class SimulationPanel(QWidget):
             p for p in self._ports
             if p.direction == PortDirection.IN and not p.is_clock
         ]
+        # Preserve existing cell values by port name before clearing
+        old_values: dict[str, list[str]] = {}
+        for row in range(self._in_table.rowCount()):
+            header = self._in_table.verticalHeaderItem(row)
+            if header:
+                port_name = header.text().split(" (")[0]
+                old_values[port_name] = []
+                for c in range(self._in_table.columnCount()):
+                    it = self._in_table.item(row, c)
+                    old_values[port_name].append(it.text().strip() if it else "0")
+
         self._in_table.setRowCount(0)
         self._in_table.setColumnCount(self._n_cycles)
         self._set_table_col_headers()
         for port in in_ports:
             row = self._in_table.rowCount()
             self._in_table.insertRow(row)
-            # Row label: "name (kind)"
             k = port.signal_type.kind
             self._in_table.setVerticalHeaderItem(row, QTableWidgetItem(f"{port.name} ({k})"))
+            prev = old_values.get(port.name, [])
             for c in range(self._n_cycles):
-                item = QTableWidgetItem("")
+                val = prev[c] if c < len(prev) else "0"
+                item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
 
@@ -528,8 +540,6 @@ class SimulationPanel(QWidget):
 
     def _on_cycles_changed(self, n: int) -> None:
         self._n_cycles = n
-        old_cols = self._in_table.columnCount()
-        # Preserve existing cell values
         data = self._get_input_data()
         self._in_table.setColumnCount(n)
         self._set_table_col_headers()
@@ -538,8 +548,9 @@ class SimulationPanel(QWidget):
                 item = QTableWidgetItem(values[c])
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
+            last = values[-1] if values else "0"
             for c in range(len(values), n):
-                item = QTableWidgetItem("")
+                item = QTableWidgetItem(last)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
 
@@ -580,6 +591,7 @@ class SimulationPanel(QWidget):
                 code_body=code,
                 param_names=[p.name for p in exec_ports],
                 name="sim",
+                extra_ns=sim_generics,
             )
         except SyntaxError as exc:
             self._show_error(f"Syntax error:\n{exc}")
@@ -689,8 +701,7 @@ class SimulationPanel(QWidget):
         # Fixed-point: try to quantize
         if kind_str in (SignalKind.SIGNED.value, SignalKind.UNSIGNED.value):
             try:
-                int_g = {n: int(v) for n, v in generics.items() if isinstance(v, (int, float))}
-                fmt = port.signal_type.to_fpformat(int_g)
+                fmt = port.signal_type.to_fpformat(generics)
                 return fmt.quantize(np.array(raw))
             except Exception:
                 pass

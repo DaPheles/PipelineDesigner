@@ -98,6 +98,6 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\ncout = total >> WIDTH\nreturn total, cout"
+        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\nsum = total & ((1 << WIDTH)-1)\ncout = total >> WIDTH\nreturn sum, cout"
     }
 }
