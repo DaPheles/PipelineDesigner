@@ -1,0 +1,32 @@
+{
+    "name": "GND",
+    "category": "primitives",
+    "description": "",
+    "ports": [
+        {
+            "name": "gnd",
+            "direction": "out",
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                1
+            ],
+            "is_clock": false,
+            "is_reset": false
+        }
+    ],
+    "generics": [],
+    "visual": {
+        "width": 2,
+        "height": 2,
+        "color": "#3d3846"
+    },
+    "latency": 0,
+    "behavior": {
+        "code": "return 0"
+    }
+}

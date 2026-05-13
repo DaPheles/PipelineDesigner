@@ -34,21 +34,6 @@
             "is_reset": false
         },
         {
-            "name": "cin",
-            "direction": "in",
-            "signal_type": {
-                "kind": "std_logic",
-                "width": "1",
-                "lsb": "0"
-            },
-            "position": [
-                0,
-                5
-            ],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
             "name": "sum",
             "direction": "out",
             "signal_type": {
@@ -57,23 +42,8 @@
                 "lsb": "LSB"
             },
             "position": [
-                5,
+                4,
                 3
-            ],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "cout",
-            "direction": "out",
-            "signal_type": {
-                "kind": "std_logic",
-                "width": "1",
-                "lsb": "0"
-            },
-            "position": [
-                5,
-                5
             ],
             "is_clock": false,
             "is_reset": false
@@ -97,12 +67,12 @@
         }
     ],
     "visual": {
-        "width": 5,
+        "width": 4,
         "height": 6,
         "color": "#ed7d31"
     },
     "latency": 0,
     "behavior": {
-        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\nsum = total & ((1 << WIDTH)-1)\ncout = total >> WIDTH\nreturn sum, cout"
+        "code": "return a + b"
     }
 }
