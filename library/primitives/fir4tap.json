@@ -1,57 +1,98 @@
 {
     "name": "FIR4Tap",
     "category": "DSP",
-    "description": "4-tap box-average FIR filter (h=[0.25,0.25,0.25,0.25]). Computes y = 0.25*(x0+x1+x2+x3). x0 is the newest sample, x3 the oldest.",
+    "description": "4-tap FIR filter \u2014 streaming single-sample interface. Each cycle one sample enters on x; the internal shift register shifts it through 4 stages and the dot product with H0..H3 appears on y. Pipelined MAC chain in hardware gives latency=4.",
     "ports": [
         {
-            "name": "x0",
+            "name": "clk",
             "direction": "in",
-            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
-            "position": [0, 2],
-            "is_clock": false,
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                6
+            ],
+            "is_clock": true,
             "is_reset": false
         },
         {
-            "name": "x1",
+            "name": "x",
             "direction": "in",
-            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
-            "position": [0, 3],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "x2",
-            "direction": "in",
-            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
-            "position": [0, 4],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "x3",
-            "direction": "in",
-            "signal_type": {"kind": "signed", "width": "16", "lsb": "-15"},
-            "position": [0, 5],
+            "signal_type": {
+                "kind": "std_logic_vector",
+                "width": "WIDTH",
+                "lsb": "LSB"
+            },
+            "position": [
+                0,
+                3
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "y",
             "direction": "out",
-            "signal_type": {"kind": "signed", "width": "17", "lsb": "-15"},
-            "position": [4, 4],
+            "signal_type": {
+                "kind": "std_logic_vector",
+                "width": "Y_WIDTH",
+                "lsb": "LSB"
+            },
+            "position": [
+                4,
+                3
+            ],
             "is_clock": false,
             "is_reset": false
         }
     ],
-    "generics": [],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 16
+        },
+        {
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": -15
+        },
+        {
+            "name": "Y_WIDTH",
+            "data_type": "integer",
+            "default_value": 18
+        },
+        {
+            "name": "H0",
+            "data_type": "float",
+            "default_value": 0.2
+        },
+        {
+            "name": "H1",
+            "data_type": "float",
+            "default_value": 0.4
+        },
+        {
+            "name": "H2",
+            "data_type": "float",
+            "default_value": 0.4
+        },
+        {
+            "name": "H3",
+            "data_type": "float",
+            "default_value": 0.2
+        }
+    ],
     "visual": {
         "width": 4,
         "height": 6,
         "color": "#3a7abf"
     },
-    "latency": 1,
+    "latency": 4,
     "behavior": {
-        "code": "# Box-average FIR: multiply each tap by 0.25 then accumulate\ncoef_fmt = Unsigned(0, -15)         # U1.15 — 0.25 is exact\nout_fmt  = Signed(1, -15)           # S2.15 — enough headroom for sum\nc = Const(coef_fmt, 0.25)\nm0 = (x0 * c).keep_full()\nm1 = (x1 * c).keep_full()\nm2 = (x2 * c).keep_full()\nm3 = (x3 * c).keep_full()\nacc = ((m0 + m1).keep_full() + (m2 + m3).keep_full()).keep_full()\nreturn acc.requantize(out_fmt, round='truncate', saturate='saturate')\n"
+        "code": "# Shift register: buf[0] = newest sample, buf[3] = oldest\n# State persists across cycles \u2014 models the internal delay line.\nif 'buf' not in state:\n    state['buf'] = [0.0, 0.0, 0.0, 0.0]\nstate['buf'] = [float(x)] + state['buf'][:3]\nreturn H0 * state['buf'][0] + H1 * state['buf'][1] + H2 * state['buf'][2] + H3 * state['buf'][3]"
     }
 }

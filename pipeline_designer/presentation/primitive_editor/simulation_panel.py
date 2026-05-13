@@ -635,9 +635,14 @@ class SimulationPanel(QWidget):
                 self._show_error(f"Compile error:\n{exc}")
                 return
 
+            # Stateful behavior (shift registers, accumulators) manages its own
+            # timing via `state`; latency shifting must not be applied on top.
+            is_stateful = "state" in code
+
             for cyc in range(self._n_cycles):
-                # Inputs that drive outputs at this cycle arrived `latency` cycles earlier.
-                src = cyc - self._latency
+                # Pure pipeline latency: output at cycle N comes from input at N-latency.
+                # Stateful code handles its own delay internally — no shift needed.
+                src = cyc if is_stateful else (cyc - self._latency)
                 if src < 0:
                     # Pipeline not yet filled — output is unknown
                     for port in out_ports:

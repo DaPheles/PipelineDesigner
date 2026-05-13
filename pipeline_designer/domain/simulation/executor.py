@@ -132,8 +132,14 @@ class BehaviorExecutor:
     ):
         self._name   = name
         self._params = list(param_names)
-        self._ns     = SimNamespace(extra_ns)
-        self._fn     = self._compile(code_body)
+        self._state: dict[str, Any] = {}
+        combined = {**(extra_ns or {}), "state": self._state}
+        self._ns  = SimNamespace(combined)
+        self._fn  = self._compile(code_body)
+
+    def reset_state(self) -> None:
+        """Clear the persistent state dict (shift registers, accumulators, etc.)."""
+        self._state.clear()
 
     # ── compilation ──────────────────────────────────────────────────────────
 

@@ -272,11 +272,13 @@ class DesignSimulator:
     # ── Runtime ───────────────────────────────────────────────────────────────
 
     def reset(self) -> None:
-        """Clear all signals; seed register Q outputs with format-matched zeros."""
+        """Clear all signals, executor state, and seed register Q outputs with zeros."""
         self._signals.clear()
         self._iface_inputs.clear()
         for reg_id, zero in self._reg_zero.items():
             self._signals[(reg_id, "q")] = zero
+        for executor in self._executors.values():
+            executor.reset_state()
 
     def set_input(self, name: str, value: SignalValue) -> None:
         """Set an interface input port value for the next ``step()`` call."""
