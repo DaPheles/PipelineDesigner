@@ -282,6 +282,33 @@ class _SceneConnectionMixin:
                     return "reset"
         return "data"
 
+    def _get_port_edge(
+        self,
+        component_id: UUID | None,
+        port_name: str,
+        interface_port_id: UUID | None = None,
+    ) -> str:
+        """Return which component edge ('left','right','top','bottom') a port is on.
+
+        Interface ports always exit horizontally: input stage → 'right',
+        output stage → 'left'.
+        """
+        if interface_port_id is not None:
+            iface_item = self._interface_port_items.get(interface_port_id)
+            if iface_item:
+                return "right" if iface_item.is_input() else "left"
+            return "right"
+
+        if component_id is not None:
+            comp_item = self._component_items.get(component_id)
+            if comp_item:
+                port_item = comp_item._port_items.get(port_name)
+                if port_item:
+                    edge = port_item._edge
+                    if edge and edge not in ("none", ""):
+                        return edge
+        return "right"
+
     def _create_connection_item(self, connection: Connection) -> ConnectionItem | None:
         """Create a graphics item for a connection."""
         source_pos = self._get_port_position(
@@ -298,12 +325,24 @@ class _SceneConnectionMixin:
         if source_pos is None or target_pos is None:
             return None
 
-        wire_kind = self._wire_kind_for_connection(connection)
+        wire_kind   = self._wire_kind_for_connection(connection)
+        source_edge = self._get_port_edge(
+            connection.source.component_id,
+            connection.source.port_name,
+            connection.source.interface_port_id,
+        )
+        target_edge = self._get_port_edge(
+            connection.target.component_id,
+            connection.target.port_name,
+            connection.target.interface_port_id,
+        )
         item = ConnectionItem(
             connection,
             QPointF(source_pos[0], source_pos[1]),
             QPointF(target_pos[0], target_pos[1]),
             wire_kind=wire_kind,
+            source_edge=source_edge,
+            target_edge=target_edge,
         )
         self.addItem(item)
         self._connection_items[connection.id] = item
