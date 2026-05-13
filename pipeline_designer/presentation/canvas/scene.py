@@ -177,6 +177,7 @@ class DesignScene(
         for connection in design.connections:
             self._create_connection_item(connection)
 
+        self._sync_interface_port_types()
         self._update_all_component_alignments()
         self._update_component_bounds()
 

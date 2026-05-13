@@ -28,6 +28,8 @@ class InterfacePort(BaseModel):
     position: tuple[int, int] | None = Field(
         default=None, description="Position in grid units (x, y)"
     )
+    is_clock: bool = Field(default=False, description="Whether this is a clock port")
+    is_reset: bool = Field(default=False, description="Whether this is a reset port")
     # Reference to internal component port this interface connects to
     internal_component_id: UUID | None = Field(
         default=None, description="Internal component ID this port connects to"

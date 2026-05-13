@@ -6,14 +6,27 @@ from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QGraphicsItem
 
 from pipeline_designer.domain.models import Connection, PortReference
+from pipeline_designer.domain.models.component import Port
 
 from .commands import AddConnectionCommand, RemoveConnectionCommand
 from .items import ConnectionItem, InterfacePortItem, TempConnectionItem
 from .items.port_item import PortItem
 
+# Signal-kind names that are concrete (not a generic placeholder).
+# Anything not in this set is treated as a generic reference and skipped.
+_KNOWN_KINDS = frozenset({
+    "std_logic", "std_logic_vector",
+    "std_ulogic", "std_ulogic_vector",
+    "signed", "unsigned",
+    "integer", "natural", "positive",
+    "boolean", "bit", "bit_vector", "real",
+})
+
 
 class _SceneConnectionMixin:
     """Manages connection drag-creation, lifecycle, and position updates."""
+
+    # ── Connection drag start ─────────────────────────────────────────────────
 
     def _start_connection(self, port_item: PortItem) -> None:
         """Start creating a connection from an output port."""
@@ -45,6 +58,38 @@ class _SceneConnectionMixin:
         self._temp_connection = TempConnectionItem(start_pos)
         self.addItem(self._temp_connection)
 
+    # ── Validation helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _signal_types_compatible(src: Port, tgt: Port) -> bool:
+        """Return False if signal types are demonstrably incompatible.
+
+        Skips the check when either side uses a generic reference (unknown
+        kind) or when widths are symbolic expressions.
+        """
+        sk = src.signal_type.kind.lower()
+        tk = tgt.signal_type.kind.lower()
+        if sk not in _KNOWN_KINDS or tk not in _KNOWN_KINDS:
+            return True  # can't determine statically
+        if sk != tk:
+            return False
+        # For vector types check concrete widths if available
+        if sk not in ("std_logic", "bit", "boolean"):
+            try:
+                if int(src.signal_type.width) != int(tgt.signal_type.width):
+                    return False
+            except (ValueError, TypeError):
+                pass  # symbolic expression — skip width check
+        return True
+
+    def _iface_port_has_connections(self, iface_id: UUID) -> bool:
+        """True if the interface port already participates in any connection."""
+        return any(
+            conn.source.interface_port_id == iface_id
+            or conn.target.interface_port_id == iface_id
+            for conn in self._design.connections
+        )
+
     def _is_valid_connection_target(self, target_port: PortItem) -> bool:
         """Check if a component port is a valid connection target."""
         if (self._connection_source_port is None
@@ -55,28 +100,53 @@ class _SceneConnectionMixin:
             return False
 
         target_comp_id = target_port.get_component_id()
+        tgt = target_port.get_port()
 
         if self._connection_source_port is not None:
             source_comp_id = self._connection_source_component_id
             if source_comp_id == target_comp_id:
                 return False
 
-            source_port_name = self._connection_source_port.get_port().name
-            target_port_name = target_port.get_port().name
+            src = self._connection_source_port.get_port()
+
+            # Clock/reset type constraints
+            if src.is_clock != tgt.is_clock:
+                return False
+            if src.is_reset != tgt.is_reset:
+                return False
+
+            # Signal kind / width compatibility (data ports only)
+            if not src.is_clock and not src.is_reset:
+                if not self._signal_types_compatible(src, tgt):
+                    return False
+
+            # Duplicate check
+            src_name = src.name
+            tgt_name = tgt.name
             for conn in self._design.connections:
                 if (conn.source.component_id == source_comp_id
-                        and conn.source.port_name == source_port_name
+                        and conn.source.port_name == src_name
                         and conn.target.component_id == target_comp_id
-                        and conn.target.port_name == target_port_name):
+                        and conn.target.port_name == tgt_name):
                     return False
 
         elif self._connection_source_interface_port is not None:
-            source_iface_port = self._connection_source_interface_port.get_interface_port()
-            target_port_name = target_port.get_port().name
+            src_iface = self._connection_source_interface_port.get_interface_port()
+            tgt_name = tgt.name
+
+            # An unconnected interface port is typeless — allow any first connection.
+            # Once it has a connection it is typed and must match.
+            if self._iface_port_has_connections(src_iface.id):
+                if src_iface.is_clock != tgt.is_clock:
+                    return False
+                if src_iface.is_reset != tgt.is_reset:
+                    return False
+
+            # Duplicate check
             for conn in self._design.connections:
-                if (conn.source.interface_port_id == source_iface_port.id
+                if (conn.source.interface_port_id == src_iface.id
                         and conn.target.component_id == target_comp_id
-                        and conn.target.port_name == target_port_name):
+                        and conn.target.port_name == tgt_name):
                     return False
 
         return True
@@ -89,17 +159,28 @@ class _SceneConnectionMixin:
         if not target_interface_port.is_output():
             return False
 
+        src = self._connection_source_port.get_port()
+        tgt_iface = target_interface_port.get_interface_port()
         source_comp_id = self._connection_source_component_id
-        source_port_name = self._connection_source_port.get_port().name
-        target_iface_port = target_interface_port.get_interface_port()
+        src_name = src.name
 
+        # Clock/reset type constraints (skip if interface port is typeless)
+        if self._iface_port_has_connections(tgt_iface.id):
+            if src.is_clock != tgt_iface.is_clock:
+                return False
+            if src.is_reset != tgt_iface.is_reset:
+                return False
+
+        # Duplicate check
         for conn in self._design.connections:
             if (conn.source.component_id == source_comp_id
-                    and conn.source.port_name == source_port_name
-                    and conn.target.interface_port_id == target_iface_port.id):
+                    and conn.source.port_name == src_name
+                    and conn.target.interface_port_id == tgt_iface.id):
                 return False
 
         return True
+
+    # ── Connection creation ───────────────────────────────────────────────────
 
     def _create_connection(
         self,
@@ -173,6 +254,34 @@ class _SceneConnectionMixin:
         command = AddConnectionCommand(scene=self, connection=connection)
         self._undo_stack.push(command)
 
+    # ── Connection item creation ──────────────────────────────────────────────
+
+    def _wire_kind_for_connection(self, connection: Connection) -> str:
+        """Return 'clock', 'reset', or 'data' for a connection's source port type."""
+        src = connection.source
+        if src.component_id is not None:
+            comp_item = self._component_items.get(src.component_id)
+            if comp_item:
+                port_item = comp_item._port_items.get(src.port_name)
+                if port_item:
+                    p = port_item.get_port()
+                    if p.is_clock:
+                        return "clock"
+                    if p.is_reset:
+                        return "reset"
+        elif src.interface_port_id is not None:
+            iport = next(
+                (p for p in self._design.interface_ports
+                 if p.id == src.interface_port_id),
+                None,
+            )
+            if iport:
+                if iport.is_clock:
+                    return "clock"
+                if iport.is_reset:
+                    return "reset"
+        return "data"
+
     def _create_connection_item(self, connection: Connection) -> ConnectionItem | None:
         """Create a graphics item for a connection."""
         source_pos = self._get_port_position(
@@ -189,10 +298,12 @@ class _SceneConnectionMixin:
         if source_pos is None or target_pos is None:
             return None
 
+        wire_kind = self._wire_kind_for_connection(connection)
         item = ConnectionItem(
             connection,
             QPointF(source_pos[0], source_pos[1]),
             QPointF(target_pos[0], target_pos[1]),
+            wire_kind=wire_kind,
         )
         self.addItem(item)
         self._connection_items[connection.id] = item
@@ -220,6 +331,58 @@ class _SceneConnectionMixin:
 
         return None
 
+    # ── Interface port type sync ──────────────────────────────────────────────
+
+    def _sync_interface_port_types(self) -> None:
+        """Derive is_clock/is_reset on InterfacePort objects from connected ports.
+
+        Called after design load and after every connection add/remove so that
+        interface port coloring and connection-type validation stay correct.
+        """
+        # Reset all flags; they'll be re-derived from connections.
+        for iport in self._design.interface_ports:
+            iport.is_clock = False
+            iport.is_reset = False
+
+        for conn in self._design.connections:
+            src, tgt = conn.source, conn.target
+
+            # Interface INPUT → component INPUT
+            if src.interface_port_id is not None and tgt.component_id is not None:
+                iport = next(
+                    (p for p in self._design.interface_ports
+                     if p.id == src.interface_port_id),
+                    None,
+                )
+                comp_item = self._component_items.get(tgt.component_id)
+                if iport and comp_item:
+                    pi = comp_item._port_items.get(tgt.port_name)
+                    if pi:
+                        p = pi.get_port()
+                        iport.is_clock = p.is_clock
+                        iport.is_reset = p.is_reset
+
+            # Component OUTPUT → interface OUTPUT
+            elif src.component_id is not None and tgt.interface_port_id is not None:
+                iport = next(
+                    (p for p in self._design.interface_ports
+                     if p.id == tgt.interface_port_id),
+                    None,
+                )
+                comp_item = self._component_items.get(src.component_id)
+                if iport and comp_item:
+                    pi = comp_item._port_items.get(src.port_name)
+                    if pi:
+                        p = pi.get_port()
+                        iport.is_clock = p.is_clock
+                        iport.is_reset = p.is_reset
+
+        # Refresh visual appearance of all interface port items.
+        for iface_item in self._interface_port_items.values():
+            iface_item._update_appearance()
+
+    # ── Cancel / cleanup ──────────────────────────────────────────────────────
+
     def _cancel_connection(self) -> None:
         """Cancel the current connection creation."""
         if self._temp_connection:
@@ -243,6 +406,8 @@ class _SceneConnectionMixin:
         for comp_item in self._component_items.values():
             comp_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
 
+    # ── Connection lifecycle ──────────────────────────────────────────────────
+
     def remove_connection(self, connection_id: UUID) -> bool:
         """Remove a connection from the scene (with undo support)."""
         item = self._connection_items.get(connection_id)
@@ -262,12 +427,14 @@ class _SceneConnectionMixin:
         self.removeItem(item)
         del self._connection_items[connection_id]
         self._design.remove_connection(connection_id)
+        self._sync_interface_port_types()
         self.connection_removed.emit(connection_id)
         return True
 
     def _add_connection_internal(self, connection: Connection) -> ConnectionItem | None:
         """Internal method to add a connection (used by commands)."""
         self._design.add_connection(connection)
+        self._sync_interface_port_types()
         item = self._create_connection_item(connection)
         self.connection_added.emit(connection)
         return item

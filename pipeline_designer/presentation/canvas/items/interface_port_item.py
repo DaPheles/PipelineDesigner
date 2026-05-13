@@ -69,10 +69,15 @@ class InterfacePortItem(QGraphicsEllipseItem):
 
     def _update_appearance(self) -> None:
         """Update the visual appearance based on direction and selection."""
-        if self._interface_port.direction == InterfaceDirection.INPUT:
-            color = QColor("#27ae60")  # Green for input
+        iport = self._interface_port
+        if iport.is_clock:
+            color = QColor("#5b9bd5")   # Blue for clock
+        elif iport.is_reset:
+            color = QColor("#c45911")   # Dark orange for reset
+        elif iport.direction == InterfaceDirection.INPUT:
+            color = QColor("#27ae60")   # Green for input
         else:
-            color = QColor("#e67e22")  # Orange for output
+            color = QColor("#e67e22")   # Orange for output
 
         if self._is_connected:
             brush_color = color

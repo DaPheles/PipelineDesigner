@@ -125,7 +125,12 @@ class DesignSimulator:
                 )
             self._inst_def[inst.id] = defn
 
-            self._inst_generics[inst.id] = inst.generic_values or {}
+            # Merge component-definition defaults with per-instance overrides so
+            # that generics like H0/WIDTH are always present by name in the
+            # executor namespace even when the instance uses all defaults.
+            resolved = {g.name: g.default_value for g in defn.generics}
+            resolved.update(inst.generic_values or {})
+            self._inst_generics[inst.id] = resolved
 
             if self._is_register(defn):
                 self._regs.add(inst.id)
@@ -136,12 +141,11 @@ class DesignSimulator:
                 self._exec_input_ports[inst.id]  = in_ports
                 self._exec_output_ports[inst.id] = out_ports
 
-                generics = self._inst_generics[inst.id]
                 self._executors[inst.id] = BehaviorExecutor(
                     code_body=defn.behavior.code,
                     param_names=in_ports,
                     name=defn.name,
-                    extra_ns={"__generics__": generics},
+                    extra_ns=resolved,  # inject generics by name for direct access
                 )
 
         # Build interface name sets

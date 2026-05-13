@@ -18,9 +18,11 @@ class ConnectionItem(QGraphicsPathItem):
     Draws a smooth bezier curve from source to target port.
     """
 
-    COLOR_NORMAL = QColor("#a0a0a0")  # Gray
+    COLOR_NORMAL = QColor("#a0a0a0")   # Gray  — data nets
+    COLOR_CLOCK  = QColor("#5b9bd5")   # Blue  — clock nets
+    COLOR_RESET  = QColor("#c45911")   # Dark orange — reset nets
     COLOR_SELECTED = QColor("#ffffff")  # White
-    COLOR_HOVER = QColor("#ffcc00")  # Yellow
+    COLOR_HOVER = QColor("#ffcc00")    # Yellow
     LINE_WIDTH = 2.0
     LINE_WIDTH_SELECTED = 3.0
 
@@ -29,6 +31,7 @@ class ConnectionItem(QGraphicsPathItem):
         connection: Connection,
         source_pos: QPointF,
         target_pos: QPointF,
+        wire_kind: str = "data",
         parent: QGraphicsItem | None = None,
     ):
         """Initialize the connection item.
@@ -44,6 +47,7 @@ class ConnectionItem(QGraphicsPathItem):
         self._connection = connection
         self._source_pos = source_pos
         self._target_pos = target_pos
+        self._wire_kind = wire_kind
         self._is_hovered = False
 
         self._setup_item()
@@ -65,6 +69,12 @@ class ConnectionItem(QGraphicsPathItem):
         elif self._is_hovered:
             color = self.COLOR_HOVER
             width = self.LINE_WIDTH_SELECTED
+        elif self._wire_kind == "clock":
+            color = self.COLOR_CLOCK
+            width = self.LINE_WIDTH
+        elif self._wire_kind == "reset":
+            color = self.COLOR_RESET
+            width = self.LINE_WIDTH
         else:
             color = self.COLOR_NORMAL
             width = self.LINE_WIDTH

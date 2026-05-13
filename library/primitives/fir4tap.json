@@ -68,7 +68,7 @@
         {
             "name": "H0",
             "data_type": "float",
-            "default_value": 0.2
+            "default_value": 0.1
         },
         {
             "name": "H1",
@@ -83,7 +83,7 @@
         {
             "name": "H3",
             "data_type": "float",
-            "default_value": 0.2
+            "default_value": 0.1
         }
     ],
     "visual": {

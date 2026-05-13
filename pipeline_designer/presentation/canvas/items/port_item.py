@@ -71,7 +71,9 @@ class PortItem(QGraphicsEllipseItem):
 
         self._update_appearance()
 
-        tooltip = f"{self._port.name}\nType: {self._port.data_type}\nDirection: {self._port.direction.value}"
+        st = self._port.signal_type
+        type_str = st.kind if st.width == "1" else f"{st.kind}[{st.width}:{st.lsb}]"
+        tooltip = f"{self._port.name}\nType: {type_str}\nDirection: {self._port.direction.value}"
         self.setToolTip(tooltip)
 
     def _get_port_color(self) -> QColor:
@@ -105,7 +107,9 @@ class PortItem(QGraphicsEllipseItem):
 
     def update_tooltip(self) -> None:
         """Update the tooltip after port properties change."""
-        tooltip = f"{self._port.name}\nType: {self._port.data_type}\nDirection: {self._port.direction.value}"
+        st = self._port.signal_type
+        type_str = st.kind if st.width == "1" else f"{st.kind}[{st.width}:{st.lsb}]"
+        tooltip = f"{self._port.name}\nType: {type_str}\nDirection: {self._port.direction.value}"
         self.setToolTip(tooltip)
 
     def is_output(self) -> bool:

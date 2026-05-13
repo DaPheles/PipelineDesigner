@@ -20,6 +20,7 @@ from pipeline_designer.infrastructure.persistence import LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
 from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, InterfacePortItem, PortItem
 from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
+from pipeline_designer.presentation.simulation import DesignSimulationPanel
 
 from .config import AppConfig
 
@@ -81,6 +82,18 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._property_dock)
 
+        # Simulation panel (bottom dock)
+        self._sim_panel = DesignSimulationPanel(design_getter=self._scene.get_design)
+        self._sim_dock = QDockWidget("Simulation", self)
+        self._sim_dock.setWidget(self._sim_panel)
+        self._sim_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._sim_dock)
+        self.resizeDocks([self._sim_dock], [260], Qt.Orientation.Vertical)
+
         # Connect signals
         self._view.zoom_changed.connect(self._on_zoom_changed)
         self._scene.selectionChanged.connect(self._on_selection_changed)
@@ -88,6 +101,13 @@ class MainWindow(QMainWindow):
         self._property_editor.interface_port_changed.connect(self._on_interface_port_changed)
         self._property_editor.rename_requested.connect(self._on_rename)
         self._property_editor.clone_requested.connect(self._on_clone)
+
+        # Keep simulation panel in sync with topology changes
+        self._scene.component_added.connect(lambda _: self._sim_panel.mark_dirty())
+        self._scene.component_removed.connect(lambda _: self._sim_panel.mark_dirty())
+        self._scene.connection_added.connect(lambda _: self._sim_panel.mark_dirty())
+        self._scene.connection_removed.connect(lambda _: self._sim_panel.mark_dirty())
+        self._scene.stages_changed.connect(self._sim_panel.mark_dirty)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -142,6 +162,16 @@ class MainWindow(QMainWindow):
         primitive_editor_action.triggered.connect(self._on_primitive_editor)
         library_menu.addAction(primitive_editor_action)
 
+        simulate_menu = menu_bar.addMenu("&Simulate")
+
+        toggle_sim_action = QAction("&Show Simulation Panel", self)
+        toggle_sim_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        toggle_sim_action.setCheckable(True)
+        toggle_sim_action.setChecked(True)
+        toggle_sim_action.triggered.connect(self._sim_dock.setVisible)
+        self._sim_dock.visibilityChanged.connect(toggle_sim_action.setChecked)
+        simulate_menu.addAction(toggle_sim_action)
+
         view_menu = menu_bar.addMenu("&View")
 
         fit_action = QAction("&Fit to Content", self)
@@ -177,6 +207,7 @@ class MainWindow(QMainWindow):
             c.name: c for c in components
         }
         self._scene.set_library(library_dict, self._library_loader)
+        self._sim_panel.set_library(library_dict)
 
         self._status_bar.showMessage(f"Loaded {len(components)} components")
 
@@ -197,6 +228,7 @@ class MainWindow(QMainWindow):
         """Handle new design action."""
         self._scene.new_design()
         self._current_file = None
+        self._sim_panel.refresh_ports()
         self._update_title()
         self._status_bar.showMessage("New design created")
 
@@ -219,6 +251,7 @@ class MainWindow(QMainWindow):
             design = Design.model_validate_json(json_str)
 
             self._scene.set_design(design)
+            self._sim_panel.refresh_ports()
 
             self._current_file = path
             self._config.add_recent_file(path)
@@ -388,6 +421,8 @@ class MainWindow(QMainWindow):
         if port_id is None:
             return
 
+        self._sim_panel.mark_dirty()
+
         # Get the interface port item and update its display
         port_item = self._scene.get_interface_port_item(port_id)
         if port_item:
@@ -414,6 +449,8 @@ class MainWindow(QMainWindow):
     def _on_primitives_changed(self) -> None:
         """Reload the library after primitives are created, edited, or deleted."""
         self._load_library()
+        # set_library is called inside _load_library(); mark ports dirty too
+        self._sim_panel.mark_dirty()
         self._status_bar.showMessage("Library reloaded")
 
     def get_scene(self) -> DesignScene:
