@@ -331,16 +331,23 @@ class SimulationPanel(QWidget):
         self._ports:    list[Port]    = []
         self._generics: list[Generic] = []
         self._n_cycles: int = self.DEFAULT_CYCLES
+        self._latency:  int = 0
         self._generic_widgets: dict[str, QWidget] = {}
         self._setup_ui()
 
     # ------------------------------------------------------------------
     # Public interface
 
-    def set_context(self, ports: list[Port], generics: list[Generic]) -> None:
-        """Update ports and generics; rebuilds generic widgets and table rows."""
+    def set_context(
+        self,
+        ports: list[Port],
+        generics: list[Generic],
+        latency: int = 0,
+    ) -> None:
+        """Update ports, generics and pipeline latency; rebuilds generic widgets and table rows."""
         self._ports    = list(ports)
         self._generics = list(generics)
+        self._latency  = max(0, latency)
         self._rebuild_generics_section()
         self._rebuild_input_table()
         self._waveform.set_data([], 0)
@@ -463,6 +470,14 @@ class SimulationPanel(QWidget):
                 idx = w.findText(default)
                 if idx >= 0:
                     w.setCurrentIndex(idx)
+            elif g.options:
+                w = QComboBox()
+                for opt in g.options:
+                    w.addItem(opt)
+                default = str(g.default_value or g.options[0])
+                idx = w.findText(default)
+                if idx >= 0:
+                    w.setCurrentIndex(idx)
             else:
                 w = QLineEdit()
                 w.setFixedWidth(70)
@@ -571,11 +586,6 @@ class SimulationPanel(QWidget):
     def _run_simulation(self) -> None:
         self._status.setVisible(False)
 
-        code = self._behavior_getter().strip()
-        if not code:
-            self._show_error("No behavior code to simulate.")
-            return
-
         sim_generics = self._get_sim_generics()
         in_ports  = [p for p in self._ports if p.direction == PortDirection.IN  and not p.is_clock]
         out_ports = [p for p in self._ports if p.direction == PortDirection.OUT]
@@ -584,25 +594,8 @@ class SimulationPanel(QWidget):
             self._show_error("No ports defined.")
             return
 
-        # Build executor (exclude clock/reset from params)
-        exec_ports = [p for p in in_ports if not p.is_reset]
-        try:
-            executor = BehaviorExecutor(
-                code_body=code,
-                param_names=[p.name for p in exec_ports],
-                name="sim",
-                extra_ns=sim_generics,
-            )
-        except SyntaxError as exc:
-            self._show_error(f"Syntax error:\n{exc}")
-            return
-        except Exception as exc:
-            self._show_error(f"Compile error:\n{exc}")
-            return
-
         # Read raw input strings from table
         raw_data = self._get_input_data()
-        in_port_names = [p.name for p in in_ports]
 
         # Per-cycle input values: port_name → [v0, v1, ...]
         input_vals: dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
@@ -617,35 +610,68 @@ class SimulationPanel(QWidget):
         # Per-cycle output values: port_name → [v0, v1, ...]
         output_vals: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
 
-        for cyc in range(self._n_cycles):
-            args = []
-            any_none = False
-            for port in exec_ports:
-                v = input_vals[port.name][cyc]
-                if v is None:
-                    any_none = True
-                args.append(v)
+        # Detect register: structural delay + reset, no executor
+        port_names_lower = {p.name.lower() for p in self._ports}
+        if {"d", "q", "clk"}.issubset(port_names_lower):
+            self._fill_register_outputs(input_vals, output_vals, sim_generics)
+        else:
+            code = self._behavior_getter().strip()
+            if not code:
+                self._show_error("No behavior code to simulate.")
+                return
 
-            if any_none:
-                for port in out_ports:
-                    output_vals[port.name].append(None)
-                continue
-
+            exec_ports = [p for p in in_ports if not p.is_reset]
             try:
-                result = executor(*args)
-                if len(out_ports) == 1:
-                    output_vals[out_ports[0].name].append(
-                        self._extract_value(result)
-                    )
-                elif len(out_ports) > 1 and isinstance(result, (tuple, list)):
-                    for port, r in zip(out_ports, result):
-                        output_vals[port.name].append(self._extract_value(r))
-                else:
+                executor = BehaviorExecutor(
+                    code_body=code,
+                    param_names=[p.name for p in exec_ports],
+                    name="sim",
+                    extra_ns=sim_generics,
+                )
+            except SyntaxError as exc:
+                self._show_error(f"Syntax error:\n{exc}")
+                return
+            except Exception as exc:
+                self._show_error(f"Compile error:\n{exc}")
+                return
+
+            for cyc in range(self._n_cycles):
+                # Inputs that drive outputs at this cycle arrived `latency` cycles earlier.
+                src = cyc - self._latency
+                if src < 0:
+                    # Pipeline not yet filled — output is unknown
                     for port in out_ports:
                         output_vals[port.name].append(None)
-            except Exception:
-                for port in out_ports:
-                    output_vals[port.name].append(None)
+                    continue
+
+                args = []
+                any_none = False
+                for port in exec_ports:
+                    v = input_vals[port.name][src]
+                    if v is None:
+                        any_none = True
+                    args.append(v)
+
+                if any_none:
+                    for port in out_ports:
+                        output_vals[port.name].append(None)
+                    continue
+
+                try:
+                    result = executor(*args)
+                    if len(out_ports) == 1:
+                        output_vals[out_ports[0].name].append(
+                            self._extract_value(result)
+                        )
+                    elif len(out_ports) > 1 and isinstance(result, (tuple, list)):
+                        for port, r in zip(out_ports, result):
+                            output_vals[port.name].append(self._extract_value(r))
+                    else:
+                        for port in out_ports:
+                            output_vals[port.name].append(None)
+                except Exception:
+                    for port in out_ports:
+                        output_vals[port.name].append(None)
 
         # Build wave signals
         wave_signals: list[WaveSignal] = []
@@ -668,6 +694,49 @@ class SimulationPanel(QWidget):
 
         self._waveform.set_data(wave_signals, self._n_cycles)
         self._wave_scroll.update()
+
+    def _fill_register_outputs(
+        self,
+        input_vals: dict[str, list[Any | None]],
+        output_vals: dict[str, list[Any | None]],
+        sim_generics: dict[str, Any],
+    ) -> None:
+        """Populate output_vals for a register using structural delay + reset semantics.
+
+        Async reset overrides q immediately (same cycle, no clock edge needed).
+        Sync reset is sampled at the clock edge (takes effect the cycle after rst asserts).
+        """
+        reset_type = str(sim_generics.get("RESET_TYPE", "sync")).lower()
+        polarity   = str(sim_generics.get("RESET_POLARITY", "high")).lower()
+
+        d_vals   = next((v for k, v in input_vals.items() if k.lower() == "d"),
+                        [None] * self._n_cycles)
+        rst_vals = next((v for k, v in input_vals.items() if k.lower() == "rst"),
+                        [None] * self._n_cycles)
+
+        def rst_active(val: Any | None) -> bool:
+            if val is None:
+                return False
+            return bool(val) if polarity == "high" else not bool(val)
+
+        q_vals: list[Any | None] = []
+        for n in range(self._n_cycles):
+            rst_now  = rst_vals[n]     if n < len(rst_vals) else None
+            rst_prev = rst_vals[n - 1] if n > 0 and (n - 1) < len(rst_vals) else None
+            d_prev   = d_vals[n - 1]   if n > 0 and (n - 1) < len(d_vals)   else None
+
+            if reset_type == "async" and rst_active(rst_now):
+                q_vals.append(0)
+            elif n == 0:
+                q_vals.append(None)    # initial state unknown before first clock edge
+            elif reset_type == "sync" and rst_active(rst_prev):
+                q_vals.append(0)
+            else:
+                q_vals.append(d_prev)
+
+        q_key = next((k for k in output_vals if k.lower() == "q"), None)
+        if q_key is not None:
+            output_vals[q_key] = q_vals
 
     # ------------------------------------------------------------------
     # Value conversion helpers

@@ -96,9 +96,10 @@ class Generic(BaseModel):
     ``signal_type.kind`` field can then reference this generic by name.
     """
 
-    name:          str = Field(..., description="Generic parameter name")
-    data_type:     str = Field(default="integer", description="Data type (integer, signal_kind, …)")
-    default_value: Any = Field(default=None, description="Default value")
+    name:          str             = Field(..., description="Generic parameter name")
+    data_type:     str             = Field(default="integer", description="Data type (integer, signal_kind, …)")
+    default_value: Any             = Field(default=None, description="Default value")
+    options:       list[str] | None = Field(default=None, description="Allowed values; renders as a drop-down when set")
 
 
 class VisualConfig(BaseModel):

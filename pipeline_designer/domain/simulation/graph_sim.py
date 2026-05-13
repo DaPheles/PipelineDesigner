@@ -293,12 +293,32 @@ class DesignSimulator:
         """Read any internal signal by (instance_id, port_name)."""
         return self._signals.get((instance_id, port_name))
 
+    def _is_rst_active(self, reg_id: UUID) -> bool:
+        """Return True if the reset input of reg_id is currently asserted."""
+        rst_val = self._resolve(reg_id, "rst")
+        if rst_val is None:
+            return False
+        polarity = str(self._inst_generics[reg_id].get("RESET_POLARITY", "high")).lower()
+        active = bool(rst_val)
+        return active if polarity == "high" else not active
+
     def step(self) -> None:
         """Execute one clock cycle.
 
+        Async-reset pre-pass: registers with RESET_TYPE=async whose rst is
+        asserted have their Q pre-seeded to zero before Phase 1 runs, so that
+        combinational logic downstream sees the reset value immediately.
+
         Phase 1: evaluate all combinational instances in topological order.
-        Phase 2: registers latch their D input into Q.
+
+        Phase 2: registers latch D→Q (or Q→0 on sync reset).
         """
+        # ── Async reset pre-pass ──────────────────────────────────────────────
+        for reg_id in self._regs:
+            reset_type = str(self._inst_generics[reg_id].get("RESET_TYPE", "sync")).lower()
+            if reset_type == "async" and self._is_rst_active(reg_id):
+                self._signals[(reg_id, "q")] = self._reg_zero[reg_id]
+
         # ── Phase 1: combinational ────────────────────────────────────────────
         for inst_id in self._topo_order:
             executor   = self._executors[inst_id]
@@ -318,8 +338,10 @@ class DesignSimulator:
         # ── Phase 2: register capture ─────────────────────────────────────────
         new_q: dict[_NetKey, SignalValue] = {}
         for reg_id in self._regs:
-            d_val = self._resolve(reg_id, "d")
-            new_q[(reg_id, "q")] = d_val
+            if self._is_rst_active(reg_id):
+                new_q[(reg_id, "q")] = self._reg_zero[reg_id]
+            else:
+                new_q[(reg_id, "q")] = self._resolve(reg_id, "d")
         self._signals.update(new_q)
 
     def _resolve(self, consumer_id: UUID, port_name: str) -> SignalValue | None:

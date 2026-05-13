@@ -4,35 +4,63 @@
     "description": "Pipelined divider. SIG_TYPE controls signed/unsigned interpretation.",
     "ports": [
         {
+            "name": "clk",
+            "direction": "in",
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                6
+            ],
+            "is_clock": true,
+            "is_reset": false
+        },
+        {
             "name": "a",
             "direction": "in",
-            "signal_type": {"kind": "SIG_TYPE", "width": "A_WIDTH", "lsb": "0"},
-            "position": [0, 2],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "A_WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                2
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "b",
             "direction": "in",
-            "signal_type": {"kind": "SIG_TYPE", "width": "B_WIDTH", "lsb": "0"},
-            "position": [0, 4],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "B_WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                4
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "q",
             "direction": "out",
-            "signal_type": {"kind": "SIG_TYPE", "width": "Q_WIDTH", "lsb": "0"},
-            "position": [4, 3],
+            "signal_type": {
+                "kind": "SIG_TYPE",
+                "width": "Q_WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                4,
+                3
+            ],
             "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "clk",
-            "direction": "in",
-            "signal_type": {"kind": "std_logic"},
-            "position": [2, 6],
-            "is_clock": true,
             "is_reset": false
         }
     ],
@@ -65,6 +93,6 @@
     },
     "latency": 3,
     "behavior": {
-        "code": ""
+        "code": "return a // b"
     }
 }

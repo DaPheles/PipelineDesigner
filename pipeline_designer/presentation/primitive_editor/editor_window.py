@@ -292,7 +292,7 @@ class PrimitiveEditorWindow(QMainWindow):
         self._canvas.set_component(comp)
 
         # Behavior tab
-        self._behavior_editor.set_behavior(comp.behavior, comp.ports, comp.generics)
+        self._behavior_editor.set_behavior(comp.behavior, comp.ports, comp.generics, comp.latency)
 
         self._modified = self._canvas.was_auto_extended()
         self._update_title()

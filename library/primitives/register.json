@@ -6,32 +6,60 @@
         {
             "name": "clk",
             "direction": "in",
-            "signal_type": {"kind": "std_logic"},
-            "position": [2, 8],
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                8
+            ],
             "is_clock": true,
             "is_reset": false
         },
         {
             "name": "rst",
             "direction": "in",
-            "signal_type": {"kind": "std_logic"},
-            "position": [1, 0],
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                1,
+                0
+            ],
             "is_clock": false,
             "is_reset": true
         },
         {
             "name": "d",
             "direction": "in",
-            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
-            "position": [0, 4],
+            "signal_type": {
+                "kind": "std_logic_vector",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                4
+            ],
             "is_clock": false,
             "is_reset": false
         },
         {
             "name": "q",
             "direction": "out",
-            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
-            "position": [4, 4],
+            "signal_type": {
+                "kind": "std_logic_vector",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                4,
+                4
+            ],
             "is_clock": false,
             "is_reset": false
         }
@@ -41,6 +69,18 @@
             "name": "WIDTH",
             "data_type": "integer",
             "default_value": 8
+        },
+        {
+            "name": "RESET_TYPE",
+            "data_type": "string",
+            "default_value": "async",
+            "options": ["async", "sync"]
+        },
+        {
+            "name": "RESET_POLARITY",
+            "data_type": "string",
+            "default_value": "high",
+            "options": ["high", "low"]
         }
     ],
     "visual": {
@@ -50,6 +90,6 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "# On every rising clock edge:\n#   if rst = '1'  →  q <= (others => '0')\n#   else           →  q <= d\nreturn d"
+        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\n# RESET_TYPE (sync|async) and RESET_POLARITY (high|low) control reset behaviour.\nreturn d"
     }
 }

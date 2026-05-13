@@ -40,6 +40,7 @@ class BehaviorEditor(QWidget):
         super().__init__(parent)
         self._ports:    list[Port]    = []
         self._generics: list[Generic] = []
+        self._latency:  int           = 0
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -105,15 +106,17 @@ class BehaviorEditor(QWidget):
         behavior: ComponentBehavior,
         ports: list[Port],
         generics: list[Generic] | None = None,
+        latency: int = 0,
     ) -> None:
-        """Populate from a ComponentBehavior, port list, and optional generics."""
+        """Populate from a ComponentBehavior, port list, optional generics and pipeline latency."""
         self._ports    = list(ports)
         self._generics = list(generics or [])
+        self._latency  = max(0, latency)
         self._code_edit.blockSignals(True)
         self._code_edit.setPlainText(behavior.code)
         self._code_edit.blockSignals(False)
         self._refresh_signature()
-        self._sim_panel.set_context(self._ports, self._generics)
+        self._sim_panel.set_context(self._ports, self._generics, self._latency)
 
     def get_behavior(self) -> ComponentBehavior:
         """Collect a ComponentBehavior from the current UI state."""
@@ -129,7 +132,7 @@ class BehaviorEditor(QWidget):
         if generics is not None:
             self._generics = list(generics)
         self._refresh_signature()
-        self._sim_panel.set_context(self._ports, self._generics)
+        self._sim_panel.set_context(self._ports, self._generics, self._latency)
 
     # ------------------------------------------------------------------
     # Private helpers
