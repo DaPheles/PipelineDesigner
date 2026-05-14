@@ -1,13 +1,13 @@
 {
     "name": "Subtract",
     "category": "primitives",
-    "description": "Generic adder with carry out. SIG_TYPE controls signed/unsigned interpretation.",
+    "description": "Generic subtract.",
     "ports": [
         {
             "name": "a",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -21,7 +21,7 @@
             "name": "b",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -35,7 +35,7 @@
             "name": "diff",
             "direction": "out",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH+1",
                 "lsb": "LSB"
             },

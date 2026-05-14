@@ -19,12 +19,16 @@ from PySide6.QtWidgets import (
 
 from pipeline_designer.domain.models import Port, PortDirection, PortSignalClass
 from pipeline_designer.domain.models.behavior import SignalKind, SignalType
+from pipeline_designer.domain.models.signal_constraints import (
+    ALLOWED_KINDS,
+    coerce_signal_type,
+    default_signal_type,
+)
 
-# Ordered list of concrete kind choices shown in the combo.
-# Editable, so users can also type a generic name reference (e.g. "SIG_TYPE").
-_KIND_OPTIONS: list[str] = [
-    SignalKind.SIGNED.value,
-    SignalKind.UNSIGNED.value,
+# All concrete kind choices (for DATA ports; others are locked automatically)
+_ALL_KIND_OPTIONS: list[str] = [
+    SignalKind.SFIXED.value,
+    SignalKind.UFIXED.value,
     SignalKind.STD_LOGIC_VECTOR.value,
     SignalKind.STD_ULOGIC_VECTOR.value,
     SignalKind.STD_LOGIC.value,
@@ -33,6 +37,14 @@ _KIND_OPTIONS: list[str] = [
     SignalKind.BOOLEAN.value,
 ]
 
+# Kind options shown for each signal class (ordered; first = default)
+_CLASS_KIND_OPTIONS: dict[PortSignalClass, list[str]] = {
+    PortSignalClass.CLOCK:   [SignalKind.STD_LOGIC.value],
+    PortSignalClass.RESET:   [SignalKind.STD_LOGIC.value],
+    PortSignalClass.CONTROL: [SignalKind.STD_LOGIC.value, SignalKind.STD_LOGIC_VECTOR.value],
+    PortSignalClass.DATA:    [SignalKind.SFIXED.value, SignalKind.UFIXED.value],
+}
+
 # Kinds that carry no bit-width (width/lsb fields disabled)
 _SCALAR_KIND_VALUES: frozenset[str] = frozenset({
     SignalKind.STD_LOGIC.value,
@@ -40,7 +52,6 @@ _SCALAR_KIND_VALUES: frozenset[str] = frozenset({
     SignalKind.INTEGER.value,
     SignalKind.BOOLEAN.value,
 })
-
 
 _SIGNAL_CLASS_OPTIONS: list[str] = [
     PortSignalClass.DATA.value,
@@ -54,18 +65,16 @@ class PortTable(QWidget):
     """Editable table of port definitions for a primitive component.
 
     Columns:
-        Name | Direction | Kind | Width | LSB | Notation | X | Y | Class
+        Name | Direction | Class | Kind | Width | LSB | Notation | X | Y
 
-    Kind is a combo of ``SignalKind`` values and is editable so a type-generic
-    name (e.g. ``SIG_TYPE``) can be entered directly.
+    Signal-class constraints are enforced automatically:
+      - CLOCK / RESET  → kind locked to std_logic; width/LSB disabled.
+      - CONTROL        → kind locked to std_logic or std_logic_vector; user
+                         may switch between them but nothing else.
+      - DATA           → kind limited to sfixed / ufixed; width/LSB enabled.
 
-    Width and LSB are disabled for scalar kinds (std_logic, integer, boolean).
-
-    Notation (e.g. ``S4.8``) is a read-only derived label, shown when both
-    Width and LSB resolve to concrete integers.
-
-    Class is a fixed combo selecting the signal's semantic role
-    (data / control / reset / clock).
+    When the signal class changes the kind is auto-corrected to the first
+    allowed option if the current kind would be invalid.
     """
 
     data_changed = Signal()
@@ -178,7 +187,7 @@ class PortTable(QWidget):
         dir_combo.currentIndexChanged.connect(self._emit_changed)
         self._table.setCellWidget(row, self._COL_DIR, dir_combo)
 
-        # Signal class combo (right after direction)
+        # Signal class
         sc_combo = QComboBox()
         for opt in _SIGNAL_CLASS_OPTIONS:
             sc_combo.addItem(opt)
@@ -186,22 +195,18 @@ class PortTable(QWidget):
         idx = sc_combo.findText(sc_val)
         if idx >= 0:
             sc_combo.setCurrentIndex(idx)
-        sc_combo.currentIndexChanged.connect(self._emit_changed)
+        # Connect AFTER setting initial value to avoid premature coercion
+        sc_combo.currentIndexChanged.connect(lambda _, r=row: self._on_signal_class_changed(r))
         self._table.setCellWidget(row, self._COL_SIGNAL_CLASS, sc_combo)
 
-        # Kind — editable combo so generic names can be typed
+        # Kind — managed by _apply_class_constraints; not directly editable by user
+        # for CLOCK/RESET/CONTROL.  Data ports get a two-item sfixed/ufixed combo.
         kind_combo = QComboBox()
-        kind_combo.setEditable(True)
-        for k in _KIND_OPTIONS:
-            kind_combo.addItem(k)
-        kind_val = port.signal_type.kind if port else SignalKind.STD_LOGIC.value
-        idx = kind_combo.findText(kind_val)
-        if idx >= 0:
-            kind_combo.setCurrentIndex(idx)
-        else:
-            kind_combo.setCurrentText(kind_val)
-        kind_combo.currentTextChanged.connect(lambda text, r=row: self._on_kind_changed(r, text))
+        kind_val = port.signal_type.kind if port else SignalKind.UFIXED.value
         self._table.setCellWidget(row, self._COL_KIND, kind_combo)
+        # Populate combo and enforce constraints for the initial class
+        sc = port.signal_class if port else PortSignalClass.DATA
+        self._apply_class_constraints(row, sc, kind_val)
 
         # Width
         width_edit = QLineEdit()
@@ -236,9 +241,67 @@ class PortTable(QWidget):
             spin.valueChanged.connect(lambda _, r=row: self._on_position_spin_changed(r))
             self._table.setCellWidget(row, col, spin)
 
-        # Initialise enabled/notation state
-        self._update_range_state(row, kind_val)
+        self._update_range_state(row, self._get_kind(row))
         return row
+
+    def _apply_class_constraints(
+        self,
+        row: int,
+        signal_class: PortSignalClass,
+        preferred_kind: str | None = None,
+    ) -> None:
+        """Rebuild the kind combo for *row* to match *signal_class* constraints.
+
+        If *preferred_kind* is in the allowed set it is selected; otherwise the
+        first allowed option is used.  The combo is disabled for classes where
+        the kind is unambiguous (CLOCK, RESET).
+        """
+        kind_combo = self._table.cellWidget(row, self._COL_KIND)
+        if not isinstance(kind_combo, QComboBox):
+            return
+
+        # Temporarily disconnect to avoid recursive signals
+        kind_combo.blockSignals(True)
+
+        options = _CLASS_KIND_OPTIONS.get(signal_class, _ALL_KIND_OPTIONS)
+        kind_combo.clear()
+        for opt in options:
+            kind_combo.addItem(opt)
+
+        # Select preferred if valid, else default to first
+        selected = preferred_kind if preferred_kind in options else options[0]
+        idx = kind_combo.findText(selected)
+        if idx >= 0:
+            kind_combo.setCurrentIndex(idx)
+
+        # Lock the combo when there is only one valid choice or the class is
+        # unambiguous (clock / reset)
+        locked = signal_class in (PortSignalClass.CLOCK, PortSignalClass.RESET)
+        kind_combo.setEnabled(not locked)
+
+        kind_combo.blockSignals(False)
+
+        # Re-wire the changed signal (was blocked during rebuild)
+        try:
+            kind_combo.currentTextChanged.disconnect()
+        except RuntimeError:
+            pass
+        kind_combo.currentTextChanged.connect(
+            lambda text, r=row: self._on_kind_changed(r, text)
+        )
+
+        self._update_range_state(row, selected)
+
+    def _on_signal_class_changed(self, row: int) -> None:
+        """Enforce kind constraints when the signal class changes."""
+        sc = self._get_signal_class(row)
+        current_kind = self._get_kind(row)
+        # Coerce: keep current kind only if it is valid for the new class
+        allowed = ALLOWED_KINDS[sc]
+        preferred = current_kind if current_kind in allowed else None
+        self._apply_class_constraints(row, sc, preferred)
+        self._update_notation(row, self._get_kind(row))
+        self._emit_changed()
 
     def _on_kind_changed(self, row: int, text: str) -> None:
         self._update_range_state(row, text)
@@ -318,7 +381,7 @@ class PortTable(QWidget):
 
     def _get_kind(self, row: int) -> str:
         w = self._table.cellWidget(row, self._COL_KIND)
-        return w.currentText() if isinstance(w, QComboBox) else SignalKind.STD_LOGIC.value
+        return w.currentText() if isinstance(w, QComboBox) else SignalKind.UFIXED.value
 
     def _get_spin(self, row: int, col: int) -> QSpinBox:
         return self._table.cellWidget(row, col)  # type: ignore[return-value]
@@ -346,15 +409,14 @@ class PortTable(QWidget):
             if isinstance(dir_combo, QComboBox)
             else PortDirection.IN
         )
+        signal_class = self._get_signal_class(row)
         kind  = self._get_kind(row)
         width = width_edit.text().strip() if isinstance(width_edit, QLineEdit) else "1"
         lsb   = lsb_edit.text().strip()  if isinstance(lsb_edit,  QLineEdit) else "0"
 
-        signal_type = SignalType(
-            kind=kind,
-            width=width or "1",
-            lsb=lsb or "0",
-        )
+        # Always validate kind against class before building the model
+        raw_st = SignalType(kind=kind, width=width or "1", lsb=lsb or "0")
+        signal_type = coerce_signal_type(raw_st, signal_class)
 
         x = self._get_spin(row, self._COL_X).value()
         y = self._get_spin(row, self._COL_Y).value()
@@ -364,5 +426,5 @@ class PortTable(QWidget):
             direction=direction,
             signal_type=signal_type,
             position=(x, y),
-            signal_class=self._get_signal_class(row),
+            signal_class=signal_class,
         )

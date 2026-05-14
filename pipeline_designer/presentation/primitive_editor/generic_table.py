@@ -22,7 +22,7 @@ _GENERIC_TYPES = [
     "std_logic",
     "real",
     "string",
-    "signal_kind",   # value is a SignalKind name: "signed", "unsigned", etc.
+    "signal_kind",   # value is a SignalKind name: "sfixed", "ufixed", etc.
 ]
 
 

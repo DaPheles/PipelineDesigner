@@ -7,13 +7,16 @@ Generates two artefacts from a ComponentDefinition:
   2. Testbench          — GHDL-compatible self-checking testbench driven by
      Python-computed golden values.
 
-Bit-width convention
---------------------
-  signed(M downto L)   →  M = width + lsb - 1,  L = lsb
-  unsigned(M downto L) →  same convention
+Bit-width convention (ieee.fixed_pkg)
+--------------------------------------
+  sfixed(M downto L)   →  M = width + lsb - 1,  L = lsb
+  ufixed(M downto L)   →  same convention
 
-For ``signed(3 downto -8)`` (S4.8):   width=12, lsb=-8  →  M=3, L=-8
-For ``signed(15 downto 0)`` (S16.0):  width=16, lsb=0   →  M=15, L=0
+For ``sfixed(3 downto -8)`` (S4.8):   width=12, lsb=-8  →  M=3, L=-8
+For ``sfixed(15 downto 0)`` (S16.0):  width=16, lsb=0   →  M=15, L=0
+
+Data ports always use sfixed/ufixed from ieee.fixed_pkg.
+Clock/reset ports use std_logic.  Control ports use std_logic[_vector].
 """
 
 from __future__ import annotations
@@ -61,7 +64,7 @@ def _fp_format_constant(port: Port, generics: dict[str, Any]) -> str:
     int_bits  = w + l
     frac_bits = -l
     k = st.resolved_kind(generics)
-    signed = "true" if k == SignalKind.SIGNED else "false"
+    signed = "true" if k == SignalKind.SFIXED else "false"
     return f"({int_bits}, {frac_bits}, {signed}, 0.0)"
 
 
@@ -79,7 +82,7 @@ def _real_to_raw(value: float, port: Port, generics: dict[str, Any]) -> int:
     step  = 2.0 ** l
     total = w
     k     = st.resolved_kind(generics)
-    signed_type = (k == SignalKind.SIGNED)
+    signed_type = (k == SignalKind.SFIXED)
     raw_real = value / step
     raw_int  = math.floor(raw_real)
     if signed_type:
@@ -107,7 +110,7 @@ def generate_entity(
         "",
         "library ieee;",
         "use ieee.std_logic_1164.all;",
-        "use ieee.numeric_std.all;",
+        "use ieee.fixed_pkg.all;",
         f"library {pkg_library};",
         f"use {pkg_library}.fixed_point_pkg.all;",
         "",
@@ -171,12 +174,12 @@ def _generate_fir4tap_architecture(component: ComponentDefinition) -> str:
         f"    constant FMT_SUM4 : fp_format_t := ({int_bits_sum4}, {frac_mul}, true,  0.0);",
         f"    constant FMT_Y    : fp_format_t := ({int_bits_y}, {frac_y}, true,  0.0);",
         "",
-        f"    constant C_COEF : unsigned({total_x - 1} downto 0) :=",
-        f"        to_unsigned({coef_raw}, {total_x});",
+        f"    constant C_COEF : ufixed({total_x - 1} downto 0) :=",
+        f"        to_ufixed({coef_raw}, {total_x - 1}, 0);",
         "",
-        f"    signal m0, m1, m2, m3 : signed({mul_bits - 1} downto 0);",
-        f"    signal s01, s23       : signed({add2_bits - 1} downto 0);",
-        f"    signal acc            : signed({add4_bits - 1} downto 0);",
+        f"    signal m0, m1, m2, m3 : sfixed({mul_bits - 1} downto 0);",
+        f"    signal s01, s23       : sfixed({add2_bits - 1} downto 0);",
+        f"    signal acc            : sfixed({add4_bits - 1} downto 0);",
         "",
         "begin",
         "",
@@ -190,10 +193,10 @@ def _generate_fir4tap_architecture(component: ComponentDefinition) -> str:
         "    acc <= fp_add_s(s01, s23);",
         "",
         "    quantize: process(acc)",
-        f"        variable tmp : signed({total_y - 1} downto 0);",
+        f"        variable tmp : sfixed({total_y - 1} downto 0);",
         "        variable sta : fp_status_t;",
         "    begin",
-        "        fp_quantize_s(acc, FMT_SUM4, FMT_Y, TRUNCATE, SAT_SATURATE, tmp, sta);",
+        "        fp_quantize_s(acc, FMT_SUM4, FMT_Y, TRUNCATE, SAT_WRAP, tmp, sta);",
         "        y <= tmp;",
         "    end process quantize;",
         "",
@@ -236,7 +239,7 @@ def generate_testbench(
         "",
         "library ieee;",
         "use ieee.std_logic_1164.all;",
-        "use ieee.numeric_std.all;",
+        "use ieee.fixed_pkg.all;",
         "use ieee.math_real.all;",
         f"library {pkg_library};",
         f"use {pkg_library}.fixed_point_pkg.all;",

@@ -1,13 +1,13 @@
 {
     "name": "Adder_Carry",
     "category": "primitives",
-    "description": "Generic adder with carry out. SIG_TYPE controls signed/unsigned interpretation.",
+    "description": "Generic adder with carry chain.",
     "ports": [
         {
             "name": "a",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -21,7 +21,7 @@
             "name": "b",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -35,7 +35,7 @@
             "name": "cin",
             "direction": "in",
             "signal_type": {
-                "kind": "std_logic",
+                "kind": "sfixed",
                 "width": "1",
                 "lsb": "0"
             },
@@ -49,7 +49,7 @@
             "name": "sum",
             "direction": "out",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH+1",
                 "lsb": "LSB"
             },
@@ -63,7 +63,7 @@
             "name": "cout",
             "direction": "out",
             "signal_type": {
-                "kind": "std_logic",
+                "kind": "sfixed",
                 "width": "1",
                 "lsb": "0"
             },
@@ -77,18 +77,13 @@
     "generics": [
         {
             "name": "WIDTH",
-            "data_type": "integer",
+            "data_type": "natural",
             "default_value": 8
         },
         {
             "name": "LSB",
             "data_type": "integer",
             "default_value": 0
-        },
-        {
-            "name": "SIG_TYPE",
-            "data_type": "signal_kind",
-            "default_value": "signed"
         }
     ],
     "visual": {

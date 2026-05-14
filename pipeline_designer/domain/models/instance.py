@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from pipeline_designer.domain.models.behavior import SignalKind, SignalType
 from pipeline_designer.domain.models.component import PortSignalClass
 
 
@@ -21,12 +22,26 @@ class InterfacePort(BaseModel):
 
     Interface ports connect the component's internal logic to external ports,
     allowing the component to be used as a primitive in larger designs.
+
+    ``signal_type`` carries the full type description (kind/width/lsb) and is
+    used by the simulation panel to quantize inputs in fixed-point mode.  When
+    not set explicitly it is derived on demand from ``data_type`` (backward
+    compat).  ``data_type`` is kept as the primary string used by the
+    simulation input table label; it must always agree with ``signal_class``
+    (see signal_constraints.py).
     """
 
     id: UUID = Field(default_factory=uuid4, description="Unique interface port ID")
     name: str = Field(..., description="External port name")
     direction: InterfaceDirection = Field(..., description="Port direction")
-    data_type: str = Field(default="std_logic_vector", description="Data type")
+    data_type: str = Field(
+        default=SignalKind.UFIXED.value,
+        description="Data type string (must be valid for signal_class)",
+    )
+    signal_type: SignalType | None = Field(
+        default=None,
+        description="Full signal type (kind/width/lsb) for fixed-point simulation",
+    )
     position: tuple[int, int] | None = Field(
         default=None, description="Position in grid units (x, y)"
     )
@@ -41,6 +56,12 @@ class InterfacePort(BaseModel):
     internal_port_name: str | None = Field(
         default=None, description="Internal port name this interface connects to"
     )
+
+    def effective_signal_type(self) -> SignalType:
+        """Return signal_type if set, else derive from data_type."""
+        if self.signal_type is not None:
+            return self.signal_type
+        return SignalType(kind=self.data_type)
 
 
 

@@ -30,6 +30,11 @@ from pipeline_designer.domain.models import (
     PortDirection,
     PortSignalClass,
 )
+from pipeline_designer.domain.models.behavior import SignalKind
+from pipeline_designer.domain.models.signal_constraints import (
+    ALLOWED_KINDS,
+    default_signal_type,
+)
 
 
 class PropertyEditor(QWidget):
@@ -67,21 +72,10 @@ class PropertyEditor(QWidget):
         self._current_interface_port: InterfacePort | None = None
         self._property_widgets: dict[str, QWidget] = {}
 
-        # Common VHDL/Verilog data types
-        self._data_types = [
-            "std_logic",
-            "std_logic_vector",
-            "signed",
-            "unsigned",
-            "integer",
-            "natural",
-            "positive",
-            "boolean",
-            "bit",
-            "bit_vector",
-            "real",
-            "time",
-            "string",
+        # Data types selectable for DATA-class interface ports
+        self._data_data_types = [
+            SignalKind.UFIXED.value,
+            SignalKind.SFIXED.value,
         ]
 
         self._setup_ui()
@@ -482,11 +476,7 @@ class PropertyEditor(QWidget):
         )
 
     def set_interface_port(self, interface_port: InterfacePort) -> None:
-        """Set the interface port to edit.
-
-        Args:
-            interface_port: The interface port to edit.
-        """
+        """Set the interface port to edit."""
         self._clear_content()
         self._current_instance = None
         self._current_definition = None
@@ -495,7 +485,6 @@ class PropertyEditor(QWidget):
         self._current_port_component_id = None
         self._current_interface_port = interface_port
 
-        # Title
         direction_str = "Input" if interface_port.direction == InterfaceDirection.INPUT else "Output"
         self._title_label.setText(f"Interface Port ({direction_str})")
 
@@ -508,28 +497,19 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["interface_port_name"] = name_edit
 
-        # Signal type (editable with dropdown)
-        type_combo = QComboBox()
-        type_combo.setEditable(True)
-        type_combo.addItems(self._data_types)
-        current_type = interface_port.data_type
-        index = type_combo.findText(current_type)
-        if index >= 0:
-            type_combo.setCurrentIndex(index)
-        else:
-            type_combo.setCurrentText(current_type)
-        type_combo.currentTextChanged.connect(self._on_interface_port_type_changed)
-        self._content_layout.addRow("Signal Type:", type_combo)
-        self._property_widgets["interface_port_type"] = type_combo
-
-        # Signal class (editable combo)
+        # Signal class (editable — drives whether type widget is read-only)
         isc_combo = QComboBox()
         for member in PortSignalClass:
             isc_combo.addItem(member.value)
         isc_combo.setCurrentText(interface_port.signal_class.value)
-        isc_combo.currentTextChanged.connect(self._on_interface_port_signal_class_changed)
         self._content_layout.addRow("Signal Class:", isc_combo)
         self._property_widgets["interface_port_signal_class"] = isc_combo
+
+        # Signal type — read-only label for clock/reset/control, combo for data
+        self._rebuild_interface_type_widget(interface_port.signal_class, interface_port.data_type)
+
+        # Connect signal class AFTER type widget is created so the rebuild sees it
+        isc_combo.currentTextChanged.connect(self._on_interface_port_signal_class_changed)
 
         # Separator
         sep = QFrame()
@@ -540,35 +520,93 @@ class PropertyEditor(QWidget):
         # Direction (read-only)
         direction_label = QLabel(interface_port.direction.value)
         if interface_port.direction == InterfaceDirection.INPUT:
-            direction_label.setStyleSheet("color: #27ae60;")  # Green for input
+            direction_label.setStyleSheet("color: #27ae60;")
         else:
-            direction_label.setStyleSheet("color: #e67e22;")  # Orange for output
+            direction_label.setStyleSheet("color: #e67e22;")
         self._content_layout.addRow("Direction:", direction_label)
 
-        # Position (read-only, if set)
         if interface_port.position:
             pos_label = QLabel(f"({interface_port.position[0]}, {interface_port.position[1]})")
             pos_label.setStyleSheet("color: #888;")
             self._content_layout.addRow("Position:", pos_label)
 
-        # ID (read-only, abbreviated)
         id_label = QLabel(str(interface_port.id)[:8])
         id_label.setStyleSheet("color: #888; font-family: monospace;")
         self._content_layout.addRow("ID:", id_label)
 
+    def _canonical_type_for_class(self, signal_class: PortSignalClass) -> str:
+        """Return the fixed data_type string for unambiguous signal classes."""
+        match signal_class:
+            case PortSignalClass.CLOCK | PortSignalClass.RESET:
+                return SignalKind.STD_LOGIC.value
+            case PortSignalClass.CONTROL:
+                return SignalKind.STD_LOGIC.value  # default; user can switch to slv
+            case _:
+                return SignalKind.UFIXED.value
+
+    def _rebuild_interface_type_widget(
+        self,
+        signal_class: PortSignalClass,
+        current_type: str,
+    ) -> None:
+        """Replace the Signal Type row with the appropriate widget for signal_class.
+
+        Clock/reset/control → read-only label (type is fixed or auto-selected).
+        Data → editable combo limited to sfixed/ufixed.
+        """
+        # Remove existing type widget row if present
+        old_w = self._property_widgets.pop("interface_port_type", None)
+        if old_w is not None:
+            for i in range(self._content_layout.rowCount()):
+                field = self._content_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+                if field and field.widget() is old_w:
+                    self._content_layout.removeRow(i)
+                    break
+
+        allowed = ALLOWED_KINDS[signal_class]
+        is_data = signal_class == PortSignalClass.DATA
+
+        if is_data:
+            # Editable combo: sfixed / ufixed
+            type_combo = QComboBox()
+            type_combo.addItems(self._data_data_types)
+            if current_type in allowed:
+                idx = type_combo.findText(current_type)
+                if idx >= 0:
+                    type_combo.setCurrentIndex(idx)
+            else:
+                type_combo.setCurrentIndex(0)
+                # Correct the model too
+                if self._current_interface_port:
+                    self._current_interface_port.data_type = type_combo.currentText()
+            type_combo.currentTextChanged.connect(self._on_interface_port_type_changed)
+            # Insert after the signal-class row (row index 1, 0-based)
+            self._content_layout.insertRow(2, "Signal Type:", type_combo)
+            self._property_widgets["interface_port_type"] = type_combo
+        else:
+            # Fixed, read-only label
+            canonical = self._canonical_type_for_class(signal_class)
+            type_label = QLabel(canonical)
+            type_label.setStyleSheet("color: #888;")
+            # Correct the model if needed
+            if self._current_interface_port and self._current_interface_port.data_type != canonical:
+                self._current_interface_port.data_type = canonical
+                self.interface_port_changed.emit(
+                    self._current_interface_port.id, "data_type", canonical
+                )
+            self._content_layout.insertRow(2, "Signal Type:", type_label)
+            self._property_widgets["interface_port_type"] = type_label
+
     def _on_interface_port_name_changed(self, name: str) -> None:
-        """Handle interface port name change."""
         if self._current_interface_port:
             new_name = name.strip()
             if new_name and new_name != self._current_interface_port.name:
-                old_name = self._current_interface_port.name
                 self._current_interface_port.name = new_name
                 self.interface_port_changed.emit(
                     self._current_interface_port.id, "name", new_name
                 )
 
     def _on_interface_port_type_changed(self, data_type: str) -> None:
-        """Handle interface port data type change."""
         if self._current_interface_port:
             new_type = data_type.strip()
             if new_type and new_type != self._current_interface_port.data_type:
@@ -590,6 +628,9 @@ class PropertyEditor(QWidget):
         self.interface_port_changed.emit(
             self._current_interface_port.id, "signal_class", new_sc
         )
+        # Rebuild type widget for the new class (auto-corrects data_type if needed)
+        current_type = self._current_interface_port.data_type
+        self._rebuild_interface_type_widget(new_sc, current_type)
 
     def update_position(self, x: float, y: float) -> None:
         """Update the displayed position (called when component moves)."""

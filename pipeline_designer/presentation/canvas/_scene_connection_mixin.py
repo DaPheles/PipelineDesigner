@@ -17,7 +17,7 @@ from .items.port_item import PortItem
 _KNOWN_KINDS = frozenset({
     "std_logic", "std_logic_vector",
     "std_ulogic", "std_ulogic_vector",
-    "signed", "unsigned",
+    "sfixed", "ufixed",
     "integer", "natural", "positive",
     "boolean", "bit", "bit_vector", "real",
 })

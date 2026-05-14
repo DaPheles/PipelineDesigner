@@ -4,7 +4,7 @@ Signal type system
 ------------------
 Each port carries a ``SignalType`` that encodes three orthogonal concerns:
 
-  kind   — what the bits represent (signed/unsigned/std_logic_vector/…).
+  kind   — what the bits represent (sfixed/ufixed/std_logic_vector/…).
            Can be a concrete ``SignalKind`` value *or* the name of a
            ``signal_kind`` generic so a single primitive works for multiple
            numeric types.
@@ -17,9 +17,15 @@ Each port carries a ``SignalType`` that encodes three orthogonal concerns:
            negative for fractional fixed-point (e.g. ``"-FRAC_BITS"``).
            MSB is always derived: ``msb = width + lsb - 1``.
 
-VHDL mapping examples (signed = ieee.numeric_std.signed):
-  kind=signed,  width=12, lsb=-8  →  signed(3 downto -8)   (S4.8)
-  kind=unsigned, width=16, lsb=-8  →  unsigned(7 downto -8) (U8.8)
+Signal-class constraints
+------------------------
+  clock / reset  →  std_logic only (scalar, no width/lsb)
+  control        →  std_logic (width=1) or std_logic_vector (width>1)
+  data           →  sfixed or ufixed only (ieee.fixed_pkg fixed-point types)
+
+VHDL mapping examples (ieee.fixed_pkg):
+  kind=sfixed,  width=12, lsb=-8  →  sfixed(3 downto -8)   (S4.8)
+  kind=ufixed,  width=16, lsb=-8  →  ufixed(7 downto -8)   (U8.8)
   kind=std_logic_vector, width=8, lsb=0 →  std_logic_vector(7 downto 0)
   kind=std_logic                        →  std_logic
 """
@@ -92,10 +98,15 @@ def _eval_index(expr: str, generics: dict[str, int]) -> int:
 # ── Signal kind ───────────────────────────────────────────────────────────────
 
 class SignalKind(str, Enum):
-    """Concrete VHDL signal type family."""
+    """Concrete VHDL signal type family.
 
-    SIGNED            = "signed"             # ieee.numeric_std.signed
-    UNSIGNED          = "unsigned"           # ieee.numeric_std.unsigned
+    Data ports must use SFIXED or UFIXED (ieee.fixed_pkg).
+    Clock/reset ports use STD_LOGIC only.
+    Control ports use STD_LOGIC (1-bit) or STD_LOGIC_VECTOR (multi-bit).
+    """
+
+    SFIXED            = "sfixed"             # ieee.fixed_pkg.sfixed — signed fixed-point
+    UFIXED            = "ufixed"             # ieee.fixed_pkg.ufixed — unsigned fixed-point
     STD_LOGIC_VECTOR  = "std_logic_vector"
     STD_ULOGIC_VECTOR = "std_ulogic_vector"
     STD_LOGIC         = "std_logic"
@@ -114,16 +125,16 @@ _SCALAR_KINDS: frozenset[SignalKind] = frozenset({
 
 # Kinds that have a binary point (can produce FPFormat)
 _FIXED_POINT_KINDS: frozenset[SignalKind] = frozenset({
-    SignalKind.SIGNED,
-    SignalKind.UNSIGNED,
+    SignalKind.SFIXED,
+    SignalKind.UFIXED,
 })
 
 # Legacy name mapping for JSON backward compatibility
 _LEGACY_KIND_MAP: dict[str, str] = {
-    "sfixed": SignalKind.SIGNED.value,
-    "ufixed": SignalKind.UNSIGNED.value,
-    "slv":    SignalKind.STD_LOGIC_VECTOR.value,
-    # std_logic_vector, std_logic, integer, boolean, signed, unsigned: keep as-is
+    "signed":   SignalKind.SFIXED.value,    # old internal name for sfixed
+    "unsigned": SignalKind.UFIXED.value,    # old internal name for ufixed
+    "slv":      SignalKind.STD_LOGIC_VECTOR.value,
+    # sfixed, ufixed, std_logic_vector, std_logic, integer, boolean: keep as-is
 }
 
 
@@ -132,7 +143,7 @@ _LEGACY_KIND_MAP: dict[str, str] = {
 class SignalType(BaseModel):
     """Complete type description for a single port.
 
-    ``kind`` is either a concrete ``SignalKind`` value (e.g. ``"signed"``) or
+    ``kind`` is either a concrete ``SignalKind`` value (e.g. ``"sfixed"``) or
     the name of a ``signal_kind`` generic (e.g. ``"SIG_TYPE"``), allowing a
     single component definition to be instantiated with different numeric types.
 
@@ -189,7 +200,7 @@ class SignalType(BaseModel):
             l = _eval_index(self.lsb,  int_g)
             int_bits  = w + l
             frac_bits = -l
-            prefix = "S" if k == SignalKind.SIGNED else "U"
+            prefix = "S" if k == SignalKind.SFIXED else "U"
             return f"{prefix}{int_bits}.{frac_bits}"
         except (ValueError, KeyError):
             return None
@@ -223,9 +234,9 @@ class SignalType(BaseModel):
                 return "bool"
             case SignalKind.INTEGER:
                 return "int"
-            case SignalKind.SIGNED:
+            case SignalKind.SFIXED:
                 return f"Signed[{self.msb_expr()}:{self.lsb}]"
-            case SignalKind.UNSIGNED:
+            case SignalKind.UFIXED:
                 return f"Unsigned[{self.msb_expr()}:{self.lsb}]"
             case _:
                 if self.has_range(g):
@@ -252,7 +263,7 @@ class SignalType(BaseModel):
         if k not in _FIXED_POINT_KINDS:
             raise TypeError(
                 f"to_fpformat() is not defined for kind={k.value!r}; "
-                "only signed / unsigned carry a fixed-point format."
+                "only sfixed / ufixed carry a fixed-point format."
             )
 
         int_g = {n: int(v) for n, v in g.items() if isinstance(v, (int, float))}
@@ -267,7 +278,7 @@ class SignalType(BaseModel):
                 f"LSB index {l} yields negative frac_bits ({frac_bits}). "
                 "LSB must be ≤ 0 for fractional formats."
             )
-        return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=(k == SignalKind.SIGNED))
+        return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=(k == SignalKind.SFIXED))
 
 
 # ── ComponentBehavior ─────────────────────────────────────────────────────────

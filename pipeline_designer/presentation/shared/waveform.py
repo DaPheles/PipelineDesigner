@@ -35,10 +35,11 @@ _C_HDR_TEXT   = QColor("#6c7086")   # header cycle-number text
 class WaveSignal:
     """One signal lane in the waveform view."""
 
-    name:     str
-    is_input: bool
-    is_bit:   bool              # True → two-level digital wave
-    values:   list[Any | None]  # per-cycle; None = unknown / X
+    name:        str
+    is_input:    bool
+    is_bit:      bool              # True → two-level digital wave
+    values:      list[Any | None]  # per-cycle; None = unknown / X
+    lane_height: int | None = None # override per-lane height (None = use widget default)
 
 
 # ── Value formatter ───────────────────────────────────────────────────────────
@@ -66,25 +67,39 @@ class WaveformWidget(QWidget):
     fit all signals and cycles; wrap in a ``QScrollArea`` for overflow.
     """
 
-    HEADER_H = 20    # cycle-number header row
-    LANE_H   = 36    # height per signal lane
-    LABEL_W  = 130   # left label area
-    CYCLE_W  = 64    # pixels per cycle
-    PAD_V    = 7     # vertical padding inside each lane
-    CHEV_W   = 9     # chevron half-width at bus transitions
+    HEADER_H    = 20    # cycle-number header row
+    LANE_H      = 36    # default height for input signal lanes
+    LANE_H_OUT  = 52    # default height for output signal lanes (more room for values)
+    LABEL_W     = 130   # left label area
+    CYCLE_W     = 64    # pixels per cycle
+    PAD_V       = 7     # vertical padding inside each lane
+    CHEV_W      = 9     # chevron half-width at bus transitions
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._signals:  list[WaveSignal] = []
         self._n_cycles: int = 0
+        self._lane_tops: list[int] = []   # precomputed y-top per signal
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"background: {_C_BG.name()};")
+
+    def _lane_h(self, sig: WaveSignal) -> int:
+        """Return the pixel height for this signal's lane."""
+        if sig.lane_height is not None:
+            return sig.lane_height
+        return self.LANE_H if sig.is_input else self.LANE_H_OUT
 
     def set_data(self, signals: list[WaveSignal], n_cycles: int) -> None:
         self._signals  = signals
         self._n_cycles = n_cycles
-        total_h = self.HEADER_H + max(1, len(signals)) * self.LANE_H
-        total_w = self.LABEL_W  + max(1, n_cycles) * self.CYCLE_W
+        # Precompute cumulative y positions
+        y = self.HEADER_H
+        self._lane_tops = []
+        for sig in signals:
+            self._lane_tops.append(y)
+            y += self._lane_h(sig)
+        total_h = max(y, self.HEADER_H + self.LANE_H)
+        total_w = self.LABEL_W + max(1, n_cycles) * self.CYCLE_W
         self.setFixedSize(total_w, total_h)
         self.update()
 
@@ -101,15 +116,16 @@ class WaveformWidget(QWidget):
         p.fillRect(0, 0, W, H, _C_BG)
         self._draw_header(p)
         for idx, sig in enumerate(self._signals):
-            lane_y = self.HEADER_H + idx * self.LANE_H
+            lane_y = self._lane_tops[idx]
+            lh = self._lane_h(sig)
             if idx % 2 == 1:
-                p.fillRect(0, lane_y, W, self.LANE_H, _C_BG_ALT)
-            self._draw_grid(p, lane_y)
-            self._draw_label(p, sig, lane_y)
+                p.fillRect(0, lane_y, W, lh, _C_BG_ALT)
+            self._draw_grid(p, lane_y, lh)
+            self._draw_label(p, sig, lane_y, lh)
             if sig.is_bit:
-                self._draw_bit_wave(p, sig, lane_y)
+                self._draw_bit_wave(p, sig, lane_y, lh)
             else:
-                self._draw_bus_wave(p, sig, lane_y)
+                self._draw_bus_wave(p, sig, lane_y, lh)
 
         p.setPen(QPen(_C_GRID, 1))
         p.drawLine(self.LABEL_W, 0, self.LABEL_W, H)
@@ -129,26 +145,26 @@ class WaveformWidget(QWidget):
         p.setPen(QPen(_C_GRID, 1))
         p.drawLine(0, self.HEADER_H - 1, self.width(), self.HEADER_H - 1)
 
-    def _draw_grid(self, p: QPainter, lane_y: int) -> None:
+    def _draw_grid(self, p: QPainter, lane_y: int, lh: int) -> None:
         pen = QPen(_C_GRID, 1, Qt.PenStyle.DotLine)
         p.setPen(pen)
         for c in range(self._n_cycles + 1):
             x = self.LABEL_W + c * self.CYCLE_W
-            p.drawLine(x, lane_y, x, lane_y + self.LANE_H)
+            p.drawLine(x, lane_y, x, lane_y + lh)
 
-    def _draw_label(self, p: QPainter, sig: WaveSignal, lane_y: int) -> None:
+    def _draw_label(self, p: QPainter, sig: WaveSignal, lane_y: int, lh: int) -> None:
         font = QFont("Monospace", 8)
         p.setFont(font)
         fm = QFontMetrics(font)
         color = _C_LABEL_IN if sig.is_input else _C_LABEL_OUT
         p.setPen(QPen(color))
         text = fm.elidedText(sig.name, Qt.TextElideMode.ElideRight, self.LABEL_W - 8)
-        ty = lane_y + (self.LANE_H + fm.ascent() - fm.descent()) // 2
+        ty = lane_y + (lh + fm.ascent() - fm.descent()) // 2
         p.drawText(4, ty, text)
 
-    def _draw_bit_wave(self, p: QPainter, sig: WaveSignal, lane_y: int) -> None:
+    def _draw_bit_wave(self, p: QPainter, sig: WaveSignal, lane_y: int, lh: int) -> None:
         y_hi = lane_y + self.PAD_V
-        y_lo = lane_y + self.LANE_H - self.PAD_V
+        y_lo = lane_y + lh - self.PAD_V
         y_md = (y_hi + y_lo) // 2
 
         pen_hi  = QPen(_C_BIT_HIGH, 2)
@@ -179,9 +195,9 @@ class WaveformWidget(QWidget):
                 p.drawLine(x0, y_cur, x1, y_cur)
                 prev = val
 
-    def _draw_bus_wave(self, p: QPainter, sig: WaveSignal, lane_y: int) -> None:
+    def _draw_bus_wave(self, p: QPainter, sig: WaveSignal, lane_y: int, lh: int) -> None:
         y_top = lane_y + self.PAD_V + 3
-        y_bot = lane_y + self.LANE_H - self.PAD_V - 3
+        y_bot = lane_y + lh - self.PAD_V - 3
         y_mid = (y_top + y_bot) // 2
 
         pen_bus = QPen(_C_BUS, 2)
@@ -239,5 +255,4 @@ class WaveformWidget(QWidget):
         x_end = self.LABEL_W + self._n_cycles * self.CYCLE_W
         last = sig.values[-1] if sig.values else None
         p.setPen(pen_bus if last is not None else pen_unk)
-        if last is not None:
-            p.drawLine(x_end, y_top, x_end, y_bot)
+        p.drawLine(x_end, y_top, x_end, y_bot)

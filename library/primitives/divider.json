@@ -1,7 +1,7 @@
 {
     "name": "Divider",
     "category": "primitives",
-    "description": "Pipelined divider. SIG_TYPE controls signed/unsigned interpretation.",
+    "description": "Pipelined divider.",
     "ports": [
         {
             "name": "clk",
@@ -21,9 +21,9 @@
             "name": "a",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "A_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 0,
@@ -35,9 +35,9 @@
             "name": "b",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "B_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 0,
@@ -49,9 +49,9 @@
             "name": "q",
             "direction": "out",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "Q_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 4,
@@ -77,9 +77,9 @@
             "default_value": 8
         },
         {
-            "name": "SIG_TYPE",
-            "data_type": "signal_kind",
-            "default_value": "signed"
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": 0
         }
     ],
     "visual": {

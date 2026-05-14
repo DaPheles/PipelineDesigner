@@ -1,13 +1,13 @@
 {
     "name": "Adder",
     "category": "primitives",
-    "description": "Generic adder with carry out. SIG_TYPE controls signed/unsigned interpretation.",
+    "description": "Generic adder.",
     "ports": [
         {
             "name": "a",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -21,7 +21,7 @@
             "name": "b",
             "direction": "in",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH",
                 "lsb": "LSB"
             },
@@ -35,7 +35,7 @@
             "name": "sum",
             "direction": "out",
             "signal_type": {
-                "kind": "SIG_TYPE",
+                "kind": "sfixed",
                 "width": "WIDTH+1",
                 "lsb": "LSB"
             },
@@ -56,11 +56,6 @@
             "name": "LSB",
             "data_type": "integer",
             "default_value": 0
-        },
-        {
-            "name": "SIG_TYPE",
-            "data_type": "signal_kind",
-            "default_value": "signed"
         }
     ],
     "visual": {

@@ -113,7 +113,7 @@ class Generic(BaseModel):
     """A generic parameter for a component.
 
     Use ``data_type = "signal_kind"`` for generics whose value is a
-    ``SignalKind`` name (e.g. ``"signed"`` / ``"unsigned"``).  The port's
+    ``SignalKind`` name (e.g. ``"sfixed"`` / ``"ufixed"``).  The port's
     ``signal_type.kind`` field can then reference this generic by name.
     """
 

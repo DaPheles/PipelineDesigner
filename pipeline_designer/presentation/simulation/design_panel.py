@@ -3,24 +3,39 @@
 Drives the full DesignSimulator (all primitives connected via the design graph)
 from a per-cycle input table and renders results in the shared WaveformWidget.
 
+Simulation modes
+----------------
+  Float (ideal)   — inputs are plain Python floats; behavior code runs with
+                    native float arithmetic.  This gives the mathematically
+                    ideal result and is the primary / default mode.
+
+  Fixed-point     — inputs are quantized to the interface port's sfixed/ufixed
+                    format before being passed to the simulator.  Behavior code
+                    then operates on FixedPointArray objects.
+
+  Co-simulation   — runs both modes in the same step and displays the
+                    fixed-point output alongside the ideal float output so the
+                    representation error can be seen directly on the waveform.
+
 Single clock domain is assumed.  Interface ports are the external boundary:
   - INPUT interface ports  → editable stimulus table (one row per port)
   - OUTPUT interface ports → waveform lanes (green)
   - INPUT interface ports  → waveform lanes (blue) — mirrored from the table
-
-The simulator is rebuilt lazily on the next Simulate click whenever the
-design topology changes (mark_dirty() is called by MainWindow slot wiring).
 """
 
 from __future__ import annotations
 
+import enum
 from typing import Any, Callable
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
@@ -30,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pipeline_designer.domain.models.behavior import SignalKind, _FIXED_POINT_KINDS
 from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection, InterfacePort
@@ -39,26 +55,21 @@ from pipeline_designer.presentation.shared.waveform import (
     WaveformWidget,
 )
 
-# Port data-type strings that map to single-bit digital waves
-_BIT_TYPES = frozenset({"std_logic", "std_ulogic", "boolean"})
+_BIT_TYPES = frozenset({
+    SignalKind.STD_LOGIC.value,
+    SignalKind.STD_ULOGIC.value,
+    "boolean",
+})
+
+
+class SimMode(enum.Enum):
+    FLOAT = "float"
+    FIXED = "fixed"
+    COSIM = "cosim"
 
 
 class DesignSimulationPanel(QWidget):
-    """Multi-cycle simulation panel for a full Design graph.
-
-    Typical wiring (done by MainWindow)::
-
-        panel = DesignSimulationPanel(design_getter=scene.get_design)
-        panel.set_library(library_dict)
-        # Topology changes:
-        scene.component_added.connect(lambda _: panel.mark_dirty())
-        scene.component_removed.connect(lambda _: panel.mark_dirty())
-        scene.connection_added.connect(lambda _: panel.mark_dirty())
-        scene.connection_removed.connect(lambda _: panel.mark_dirty())
-        scene.stages_changed.connect(panel.mark_dirty)
-        # Design replaced:
-        panel.refresh_ports()   # call after scene.set_design() / new_design()
-    """
+    """Multi-cycle simulation panel for a full Design graph."""
 
     DEFAULT_CYCLES = 8
 
@@ -70,9 +81,11 @@ class DesignSimulationPanel(QWidget):
         super().__init__(parent)
         self._design_getter = design_getter
         self._library: dict[str, ComponentDefinition] = {}
-        self._simulator: DesignSimulator | None = None
+        self._simulator_float: DesignSimulator | None = None
+        self._simulator_fixed: DesignSimulator | None = None
         self._dirty = True
         self._n_cycles = self.DEFAULT_CYCLES
+        self._mode = SimMode.FLOAT
         self._input_ports:  list[InterfacePort] = []
         self._output_ports: list[InterfacePort] = []
         self._setup_ui()
@@ -81,24 +94,19 @@ class DesignSimulationPanel(QWidget):
     # Public interface
 
     def set_library(self, library: dict[str, ComponentDefinition]) -> None:
-        """Update the component library; forces simulator rebuild on next run."""
         self._library  = library
-        self._simulator = None
+        self._simulator_float = None
+        self._simulator_fixed = None
         self._dirty    = True
 
     def mark_dirty(self) -> None:
-        """Mark simulator stale after any topology change."""
-        self._simulator = None
+        self._simulator_float = None
+        self._simulator_fixed = None
         self._dirty    = True
         self._stale_label.setVisible(True)
 
     def refresh_ports(self) -> None:
-        """Re-read interface ports from the current design and rebuild the input table.
-
-        Call this after a design is loaded or replaced (not just modified).
-        Clock interface ports are excluded from the stimulus table — the
-        simulator's two-phase model drives clocking internally.
-        """
+        """Re-read interface ports from the current design and rebuild the input table."""
         design = self._design_getter()
         self._input_ports  = [p for p in design.get_input_interfaces()
                                if p.signal_class != PortSignalClass.CLOCK]
@@ -145,6 +153,23 @@ class DesignSimulationPanel(QWidget):
         hbar.addStretch()
         root.addLayout(hbar)
 
+        # ── Mode selector ─────────────────────────────────────────────
+        mode_bar = QHBoxLayout()
+        mode_bar.addWidget(QLabel("Mode:"))
+        self._mode_group = QButtonGroup(self)
+        for label, mode in (
+            ("Float (ideal)", SimMode.FLOAT),
+            ("Fixed-point", SimMode.FIXED),
+            ("Co-sim", SimMode.COSIM),
+        ):
+            rb = QRadioButton(label)
+            rb.setChecked(mode == self._mode)
+            rb.toggled.connect(lambda checked, m=mode: self._on_mode_toggled(checked, m))
+            self._mode_group.addButton(rb)
+            mode_bar.addWidget(rb)
+        mode_bar.addStretch()
+        root.addLayout(mode_bar)
+
         # ── Status / error label ──────────────────────────────────────
         self._status = QLabel("")
         self._status.setStyleSheet("color:#f38ba8; font-size:8pt;")
@@ -155,7 +180,6 @@ class DesignSimulationPanel(QWidget):
         # ── Splitter: input table (top) | waveform (bottom) ──────────
         splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Input table
         in_frame = QWidget()
         in_layout = QVBoxLayout(in_frame)
         in_layout.setContentsMargins(0, 0, 0, 0)
@@ -172,12 +196,11 @@ class DesignSimulationPanel(QWidget):
         in_layout.addWidget(self._in_table)
         splitter.addWidget(in_frame)
 
-        # Waveform
         wave_frame = QWidget()
         wave_layout = QVBoxLayout(wave_frame)
         wave_layout.setContentsMargins(0, 0, 0, 0)
         wave_layout.setSpacing(2)
-        wave_lbl = QLabel("Waveform  (blue = input, green = output)")
+        wave_lbl = QLabel("Waveform  (blue = input, green = output, orange = fixed-point)")
         wave_lbl.setStyleSheet("color:#6c7086; font-size:8pt;")
         wave_layout.addWidget(wave_lbl)
         self._wave_scroll = QScrollArea()
@@ -195,7 +218,6 @@ class DesignSimulationPanel(QWidget):
     # Input table management
 
     def _rebuild_input_table(self) -> None:
-        # Preserve existing cell text keyed by port name
         old: dict[str, list[str]] = {}
         for row in range(self._in_table.rowCount()):
             h = self._in_table.verticalHeaderItem(row)
@@ -242,6 +264,10 @@ class DesignSimulationPanel(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
 
+    def _on_mode_toggled(self, checked: bool, mode: SimMode) -> None:
+        if checked:
+            self._mode = mode
+
     def _get_input_data(self) -> list[list[str]]:
         return [
             [
@@ -271,65 +297,112 @@ class DesignSimulationPanel(QWidget):
             self._show_error("Design has no interface ports.  Add inputs/outputs on the canvas.")
             return
 
-        # Lazily rebuild simulator
-        if self._dirty or self._simulator is None:
+        run_float = self._mode in (SimMode.FLOAT, SimMode.COSIM)
+        run_fixed = self._mode in (SimMode.FIXED, SimMode.COSIM)
+
+        if run_float and (self._dirty or self._simulator_float is None):
             try:
-                self._simulator = DesignSimulator(design, self._library)
+                self._simulator_float = DesignSimulator(design, self._library)
             except Exception as exc:
                 self._show_error(f"Build error: {exc}")
                 return
-            self._dirty = False
 
-        # Parse stimulus from table
+        if run_fixed and (self._dirty or self._simulator_fixed is None):
+            try:
+                self._simulator_fixed = DesignSimulator(design, self._library)
+            except Exception as exc:
+                self._show_error(f"Build error (fixed): {exc}")
+                return
+
+        self._dirty = False
+
         raw = self._get_input_data()
-        input_vals: dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
+        input_vals_float: dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
+        input_vals_fixed: dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
+
         for row, port in enumerate(in_ports):
             row_strs = raw[row] if row < len(raw) else []
             for c in range(self._n_cycles):
                 txt = row_strs[c] if c < len(row_strs) else ""
-                input_vals[port.name].append(
-                    self._parse_input(txt, port.data_type)
+                fval = self._parse_float(txt, port)
+                input_vals_float[port.name].append(fval)
+                input_vals_fixed[port.name].append(
+                    self._quantize_input(fval, port) if run_fixed else None
                 )
 
-        output_vals: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
+        output_float: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
+        output_fixed: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
 
-        # Run N clock cycles
-        self._simulator.reset()
-        for cyc in range(self._n_cycles):
-            for port in in_ports:
-                v = input_vals[port.name][cyc]
-                if v is not None:
-                    self._simulator.set_input(port.name, v)
-            try:
-                self._simulator.step()
-            except Exception as exc:
-                self._show_error(f"Cycle {cyc}: {exc}")
-                # Fill remaining output cycles with X
-                remaining = self._n_cycles - cyc
+        if run_float:
+            sim = self._simulator_float
+            sim.reset()
+            for cyc in range(self._n_cycles):
+                for port in in_ports:
+                    v = input_vals_float[port.name][cyc]
+                    if v is not None:
+                        sim.set_input(port.name, v)
+                try:
+                    sim.step()
+                except Exception as exc:
+                    self._show_error(f"Float sim cycle {cyc}: {exc}")
+                    remaining = self._n_cycles - cyc
+                    for port in out_ports:
+                        output_float[port.name].extend([None] * remaining)
+                    break
                 for port in out_ports:
-                    output_vals[port.name].extend([None] * remaining)
-                break
+                    output_float[port.name].append(
+                        self._extract_value(sim.get_output(port.name))
+                    )
 
-            for port in out_ports:
-                raw_val = self._simulator.get_output(port.name)
-                output_vals[port.name].append(self._extract_value(raw_val))
+        if run_fixed:
+            sim = self._simulator_fixed
+            sim.reset()
+            for cyc in range(self._n_cycles):
+                for port in in_ports:
+                    v = input_vals_fixed[port.name][cyc]
+                    if v is not None:
+                        sim.set_input(port.name, v)
+                try:
+                    sim.step()
+                except Exception as exc:
+                    self._show_error(f"Fixed sim cycle {cyc}: {exc}")
+                    remaining = self._n_cycles - cyc
+                    for port in out_ports:
+                        output_fixed[port.name].extend([None] * remaining)
+                    break
+                for port in out_ports:
+                    output_fixed[port.name].append(
+                        self._extract_value(sim.get_output(port.name))
+                    )
 
         # Build waveform lanes
         signals: list[WaveSignal] = []
+        is_bit_fn = lambda p: p.data_type.lower() in _BIT_TYPES  # noqa: E731
+
         for port in in_ports:
             signals.append(WaveSignal(
                 name=port.name,
                 is_input=True,
-                is_bit=(port.data_type.lower() in _BIT_TYPES),
-                values=input_vals[port.name],
+                is_bit=is_bit_fn(port),
+                values=input_vals_float[port.name],
             ))
+
         for port in out_ports:
-            signals.append(WaveSignal(
-                name=port.name,
-                is_input=False,
-                is_bit=(port.data_type.lower() in _BIT_TYPES),
-                values=output_vals[port.name],
-            ))
+            is_bit = is_bit_fn(port)
+            if run_float:
+                signals.append(WaveSignal(
+                    name=port.name + (" (float)" if self._mode == SimMode.COSIM else ""),
+                    is_input=False,
+                    is_bit=is_bit,
+                    values=output_float[port.name],
+                ))
+            if run_fixed:
+                signals.append(WaveSignal(
+                    name=port.name + (" (fp)" if self._mode == SimMode.COSIM else ""),
+                    is_input=False,
+                    is_bit=is_bit,
+                    values=output_fixed[port.name],
+                ))
 
         self._waveform.set_data(signals, self._n_cycles)
         self._wave_scroll.update()
@@ -338,8 +411,8 @@ class DesignSimulationPanel(QWidget):
     # Value helpers
 
     @staticmethod
-    def _parse_input(text: str, data_type: str) -> Any | None:
-        """Parse a cell string into a Python value appropriate for data_type."""
+    def _parse_float(text: str, port: InterfacePort) -> Any | None:
+        """Parse a cell string into a Python float (or bool/int for bit types)."""
         text = text.strip()
         if not text:
             return None
@@ -347,14 +420,30 @@ class DesignSimulationPanel(QWidget):
             val = float(text)
         except ValueError:
             return None
-        dt = data_type.lower()
-        if dt in ("std_logic", "std_ulogic"):
+        dt = port.data_type.lower()
+        if dt in (SignalKind.STD_LOGIC.value, SignalKind.STD_ULOGIC.value):
             return bool(int(val))
         if dt == "boolean":
             return bool(val)
         if dt == "integer":
             return int(round(val))
+        # data ports (sfixed/ufixed) and others → plain float for ideal sim
         return val
+
+    @staticmethod
+    def _quantize_input(value: Any | None, port: InterfacePort) -> Any | None:
+        """Quantize *value* to the port's fixed-point format for fixed-point sim."""
+        if value is None:
+            return None
+        st = port.effective_signal_type()
+        k = st.resolved_kind()
+        if k not in _FIXED_POINT_KINDS:
+            return value  # not a fixed-point type, pass through as-is
+        try:
+            fmt = st.to_fpformat()
+            return fmt.quantize(np.array(float(value)))
+        except Exception:
+            return value
 
     @staticmethod
     def _extract_value(result: Any) -> Any | None:
