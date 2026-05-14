@@ -21,7 +21,7 @@ _EDGE_VEC: dict[str, tuple[int, int]] = {
     "bottom": ( 0,  1),
 }
 
-_ORTHO_STUB = 20   # px — initial stub length at each port end
+_ORTHO_STUB = 30   # px — initial stub length at each port end
 
 
 class ConnectionItem(QGraphicsPathItem):
