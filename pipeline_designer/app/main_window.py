@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self._scene.connection_added.connect(lambda _: self._sim_panel.mark_dirty())
         self._scene.connection_removed.connect(lambda _: self._sim_panel.mark_dirty())
         self._scene.stages_changed.connect(self._sim_panel.mark_dirty)
+        self._scene.validation_warnings.connect(self._on_validation_warnings)
 
     def _setup_menus(self) -> None:
         """Set up the menu bar."""
@@ -332,6 +333,14 @@ class MainWindow(QMainWindow):
     def _on_zoom_changed(self, zoom: float) -> None:
         """Handle zoom level changes."""
         self._status_bar.showMessage(f"Zoom: {zoom * 100:.0f}%")
+
+    def _on_validation_warnings(self, warnings: list) -> None:
+        """Show signal-class mismatch warnings in the status bar."""
+        if not warnings:
+            return
+        count = len(warnings)
+        summary = warnings[0] if count == 1 else f"{count} invalid connections"
+        self._status_bar.showMessage(f"⚠ {summary}", 8000)
 
     def _on_selection_changed(self) -> None:
         """Handle scene selection changes."""

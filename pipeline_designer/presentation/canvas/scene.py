@@ -66,12 +66,13 @@ class DesignScene(
     - _SceneAlignmentMixin   : undo/redo, stage group-move, composite alignment
     """
 
-    component_added = Signal(object)  # ComponentInstance
+    component_added = Signal(object)    # ComponentInstance
     component_removed = Signal(object)  # UUID
-    component_selected = Signal(object)  # ComponentInstance or None
-    stages_changed = Signal()  # Emitted when stage configuration changes
-    connection_added = Signal(object)  # Connection
-    connection_removed = Signal(object)  # UUID
+    component_selected = Signal(object) # ComponentInstance or None
+    stages_changed = Signal()           # Emitted when stage configuration changes
+    connection_added = Signal(object)   # Connection
+    connection_removed = Signal(object) # UUID
+    validation_warnings = Signal(list)  # list[str] — signal-class mismatch warnings
 
     def __init__(self, grid: GridConfig | None = None, parent=None):
         super().__init__(parent)
@@ -180,6 +181,7 @@ class DesignScene(
         self._sync_interface_port_types()
         self._update_all_component_alignments()
         self._update_component_bounds()
+        self._emit_validation_warnings(self._validate_all_connections())
 
     def new_design(self) -> None:
         """Create a new empty design."""

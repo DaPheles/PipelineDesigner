@@ -36,6 +36,7 @@ class ConnectionItem(QGraphicsPathItem):
     COLOR_CLOCK    = QColor("#5b9bd5")   # blue        — clock nets
     COLOR_RESET    = QColor("#c45911")   # dark orange — reset nets
     COLOR_CONTROL  = QColor("#9b59b6")   # purple      — control nets
+    COLOR_INVALID  = QColor("#ff3333")   # bright red  — class mismatch
     COLOR_SELECTED = QColor("#ffffff")   # white
     COLOR_HOVER    = QColor("#ffcc00")   # yellow
     LINE_WIDTH          = 2.0
@@ -71,6 +72,7 @@ class ConnectionItem(QGraphicsPathItem):
         self._source_edge  = source_edge
         self._target_edge  = target_edge
         self._is_hovered   = False
+        self._is_invalid   = False
 
         self._setup_item()
         self._update_path()
@@ -87,24 +89,35 @@ class ConnectionItem(QGraphicsPathItem):
         if self.isSelected():
             color = self.COLOR_SELECTED
             width = self.LINE_WIDTH_SELECTED
+            style = Qt.PenStyle.SolidLine
         elif self._is_hovered:
             color = self.COLOR_HOVER
             width = self.LINE_WIDTH_SELECTED
+            style = Qt.PenStyle.SolidLine
+        elif self._is_invalid:
+            color = self.COLOR_INVALID
+            width = self.LINE_WIDTH_SELECTED
+            style = Qt.PenStyle.DashLine
         elif self._wire_kind == "clock":
             color = self.COLOR_CLOCK
             width = self.LINE_WIDTH
+            style = Qt.PenStyle.SolidLine
         elif self._wire_kind == "reset":
             color = self.COLOR_RESET
             width = self.LINE_WIDTH
+            style = Qt.PenStyle.SolidLine
         elif self._wire_kind == "control":
             color = self.COLOR_CONTROL
             width = self.LINE_WIDTH
+            style = Qt.PenStyle.SolidLine
         else:
             color = self.COLOR_NORMAL
             width = self.LINE_WIDTH
+            style = Qt.PenStyle.SolidLine
 
         pen = QPen(color)
         pen.setWidth(int(width))
+        pen.setStyle(style)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         self.setPen(pen)
@@ -209,6 +222,16 @@ class ConnectionItem(QGraphicsPathItem):
 
     def get_connection(self) -> Connection:
         return self._connection
+
+    def set_invalid(self, invalid: bool, reason: str = "") -> None:
+        """Mark this connection as invalid (signal-class mismatch).
+
+        Invalid connections render as a red dashed line and carry a tooltip
+        explaining the mismatch.
+        """
+        self._is_invalid = invalid
+        self.setToolTip(f"⚠ Invalid connection: {reason}" if invalid else "")
+        self._update_appearance()
 
     def set_source_pos(self, pos: QPointF) -> None:
         self._source_pos = pos

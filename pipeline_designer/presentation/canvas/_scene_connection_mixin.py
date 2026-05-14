@@ -6,7 +6,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QGraphicsItem
 
 from pipeline_designer.domain.models import Connection, PortReference
-from pipeline_designer.domain.models.component import Port
+from pipeline_designer.domain.models.component import Port, PortSignalClass
 
 from .commands import AddConnectionCommand, RemoveConnectionCommand
 from .items import ConnectionItem, InterfacePortItem, TempConnectionItem
@@ -460,6 +460,7 @@ class _SceneConnectionMixin:
         self._design.remove_connection(connection_id)
         self._sync_interface_port_types()
         self.connection_removed.emit(connection_id)
+        self._emit_validation_warnings(self._validate_all_connections())
         return True
 
     def _add_connection_internal(self, connection: Connection) -> ConnectionItem | None:
@@ -468,6 +469,7 @@ class _SceneConnectionMixin:
         self._sync_interface_port_types()
         item = self._create_connection_item(connection)
         self.connection_added.emit(connection)
+        self._emit_validation_warnings(self._validate_all_connections())
         return item
 
     def _restore_connection_internal(self, connection: Connection) -> ConnectionItem | None:
@@ -495,3 +497,53 @@ class _SceneConnectionMixin:
                 )
 
         self._update_component_bounds()
+
+    # ── Connection validation ─────────────────────────────────────────────────
+
+    def _resolve_signal_class(self, ref: PortReference) -> PortSignalClass | None:
+        """Return the PortSignalClass for a port reference, or None if unresolvable."""
+        if ref.component_id is not None:
+            comp_item = self._component_items.get(ref.component_id)
+            if comp_item:
+                port_item = comp_item._port_items.get(ref.port_name)
+                if port_item:
+                    return port_item.get_port().signal_class
+        elif ref.interface_port_id is not None:
+            iport = next(
+                (p for p in self._design.interface_ports
+                 if p.id == ref.interface_port_id),
+                None,
+            )
+            if iport:
+                return iport.signal_class
+        return None
+
+    def _validate_all_connections(self) -> list[str]:
+        """Check every connection for signal-class mismatches.
+
+        Marks each ConnectionItem invalid/valid and returns a list of human-readable
+        warning strings for any mismatches found.
+        """
+        warnings: list[str] = []
+        for conn_item in self._connection_items.values():
+            conn = conn_item.get_connection()
+            src_class = self._resolve_signal_class(conn.source)
+            tgt_class = self._resolve_signal_class(conn.target)
+
+            if src_class is not None and tgt_class is not None and src_class != tgt_class:
+                src_label = conn.source.port_name
+                tgt_label = conn.target.port_name
+                reason = (
+                    f"'{src_label}' ({src_class.value}) → '{tgt_label}' ({tgt_class.value})"
+                )
+                conn_item.set_invalid(True, reason)
+                warnings.append(f"Signal-class mismatch: {reason}")
+            else:
+                conn_item.set_invalid(False)
+
+        return warnings
+
+    def _emit_validation_warnings(self, warnings: list[str]) -> None:
+        """Emit the validation_warnings signal if the scene has one."""
+        if hasattr(self, "validation_warnings"):
+            self.validation_warnings.emit(warnings)
