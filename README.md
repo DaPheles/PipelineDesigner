@@ -326,61 +326,7 @@ The application has three distinct test layers. Each targets a different part of
 
 These are the fastest, most reliable tests. `domain/` has zero Qt dependencies — any Pydantic model or simulation class can be instantiated and asserted on directly.
 
-```python
-# tests/test_domain_models.py
-from pipeline_designer.domain.models.component import Port, PortDirection, PortSignalClass
-from pipeline_designer.domain.models.design import Design
-from pipeline_designer.domain.models.instance import ComponentInstance, Connection, PortReference
-
-
-def test_port_signal_class_default():
-    port = Port(name="d", direction=PortDirection.IN)
-    assert port.signal_class == PortSignalClass.DATA
-
-
-def test_port_legacy_migration_is_clock():
-    """Old JSON with is_clock=true must migrate to signal_class=clock."""
-    port = Port.model_validate({"name": "clk", "direction": "in", "is_clock": True})
-    assert port.signal_class == PortSignalClass.CLOCK
-    assert not hasattr(port, "is_clock")  # legacy field was consumed
-
-
-def test_design_add_remove_component():
-    design = Design()
-    inst = ComponentInstance(definition_ref="Add", position=(0, 0))
-    design.add_component(inst)
-    assert design.get_component_by_id(inst.id) is inst
-    design.remove_component(inst.id)
-    assert design.get_component_by_id(inst.id) is None
-
-
-def test_design_remove_component_removes_connections():
-    design = Design()
-    a = ComponentInstance(definition_ref="Add", position=(0, 0))
-    b = ComponentInstance(definition_ref="Mul", position=(5, 0))
-    design.add_component(a)
-    design.add_component(b)
-    conn = Connection(
-        source=PortReference(component_id=a.id, port_name="out"),
-        target=PortReference(component_id=b.id, port_name="in"),
-    )
-    design.add_connection(conn)
-    assert len(design.connections) == 1
-    design.remove_component(a.id)
-    assert len(design.connections) == 0
-
-
-def test_port_signal_class_serialisation_roundtrip():
-    from pipeline_designer.domain.models.instance import ComponentInstance
-    inst = ComponentInstance(
-        definition_ref="Reg",
-        position=(0, 0),
-        port_signal_classes={"clk": "clock", "d": "data"},
-    )
-    raw = inst.model_dump_json()
-    restored = ComponentInstance.model_validate_json(raw)
-    assert restored.port_signal_classes == {"clk": "clock", "d": "data"}
-```
+- refer to 'tests/test_domain_models.py'
 
 ### Layer 2 — Scene logic tests (headless Qt, no display)
 
@@ -400,143 +346,13 @@ def qapp():
     yield app
 ```
 
-```python
-# tests/test_scene.py
-import pytest
-from pipeline_designer.domain.models.component import ComponentDefinition, Port, PortDirection, PortSignalClass
-from pipeline_designer.presentation.canvas.scene import DesignScene
-
-
-@pytest.fixture
-def library():
-    """Minimal component library with one primitive."""
-    add_def = ComponentDefinition(
-        name="Add",
-        ports=[
-            Port(name="a", direction=PortDirection.IN,  position=(0, 1)),
-            Port(name="b", direction=PortDirection.IN,  position=(0, 2)),
-            Port(name="out", direction=PortDirection.OUT, position=(4, 1)),
-        ],
-    )
-    return {"Add": add_def}
-
-
-@pytest.fixture
-def scene(qapp, library):
-    s = DesignScene()
-    s.set_library(library)
-    return s
-
-
-def test_add_component_emits_signal(scene, library):
-    received = []
-    scene.component_added.connect(lambda inst: received.append(inst))
-    scene.add_component_from_definition(library["Add"], (0, 0))
-    assert len(received) == 1
-    assert received[0].definition_ref == "Add"
-
-
-def test_undo_remove_component(scene, library):
-    scene.add_component_from_definition(library["Add"], (0, 0))
-    assert len(scene.get_design().components) == 1
-    scene.undo()
-    assert len(scene.get_design().components) == 0
-
-
-def test_signal_class_mismatch_blocks_connection(scene, library):
-    """A clock→data connection must not be created."""
-    clk_def = ComponentDefinition(
-        name="ClkGen",
-        ports=[Port(name="clk_out", direction=PortDirection.OUT,
-                    position=(4, 1), signal_class=PortSignalClass.CLOCK)],
-    )
-    scene._library["ClkGen"] = clk_def
-    scene.add_component_from_definition(clk_def, (0, 0))
-    scene.add_component_from_definition(library["Add"], (10, 0))
-
-    design = scene.get_design()
-    assert len(design.connections) == 0  # nothing connected yet
-
-    src_inst, tgt_inst = design.components
-    src_port = scene._component_items[src_inst.id]._port_items["clk_out"]
-    tgt_port = scene._component_items[tgt_inst.id]._port_items["a"]
-
-    is_valid = scene._is_valid_connection_target_for_ports(src_port, tgt_port)
-    assert not is_valid
-```
+- refer to 'tests/test_scene.py'
 
 ### Layer 3 — UI interaction tests (pytest-qt)
 
 `pytest-qt` provides `qtbot`, which simulates mouse/keyboard events and waits for Qt signals. Install with `pip install pytest-qt`.
 
-```python
-# tests/test_ui_interactions.py
-import pytest
-from PySide6.QtCore import Qt, QPointF
-from pipeline_designer.presentation.canvas.scene import DesignScene
-from pipeline_designer.presentation.canvas.view import DesignView
-
-
-@pytest.fixture
-def view(qtbot, library):
-    scene = DesignScene()
-    scene.set_library(library)
-    v = DesignView(scene)
-    qtbot.addWidget(v)
-    v.show()
-    return v, scene
-
-
-def test_drop_component_onto_canvas(qtbot, view, library):
-    """Simulate a component being dropped from the palette."""
-    v, scene = view
-    with qtbot.waitSignal(scene.component_added, timeout=1000):
-        scene.add_component_from_definition(library["Add"], (5, 5))
-
-    assert len(scene.get_design().components) == 1
-
-
-def test_property_editor_shows_port_signal_class(qtbot, view, library):
-    """Selecting a port must populate the property editor with its signal class."""
-    from pipeline_designer.presentation.panels.property_editor import PropertyEditor
-    v, scene = view
-    editor = PropertyEditor()
-    qtbot.addWidget(editor)
-
-    scene.add_component_from_definition(library["Add"], (5, 5))
-    inst = scene.get_design().components[0]
-    comp_item = scene._component_items[inst.id]
-    port_item = comp_item._port_items["a"]
-
-    editor.show_port(port_item)
-    # Find the signal_class combo
-    combo = editor.findChild(type(editor._signal_class_combo), "signal_class_combo")
-    assert combo.currentText().lower() == "data"
-
-
-def test_invalid_connection_turns_red_after_class_change(qtbot, view, library):
-    """After changing a port to clock, an existing data connection must be invalid."""
-    v, scene = view
-
-    # Place two Add components and connect them
-    scene.add_component_from_definition(library["Add"], (0, 0))
-    scene.add_component_from_definition(library["Add"], (10, 0))
-    insts = scene.get_design().components
-
-    # Wire out→a directly via scene API
-    src = scene._component_items[insts[0].id]._port_items["out"]
-    tgt = scene._component_items[insts[1].id]._port_items["a"]
-    scene._create_connection(src, insts[0].id, tgt)
-    assert len(scene.get_design().connections) == 1
-
-    # Change source port class to clock
-    src.get_port().signal_class = PortSignalClass.CLOCK
-    insts[0].port_signal_classes["out"] = "clock"
-    scene.revalidate_connections()
-
-    invalid_ids = scene.get_invalid_connection_ids()
-    assert len(invalid_ids) == 1
-```
+- refer to 'tests/test_ui_interactions.py'
 
 ### Recommended directory layout
 
