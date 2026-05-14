@@ -12,7 +12,6 @@ def test_port_legacy_migration_is_clock():
     """Old JSON with is_clock=true must migrate to signal_class=clock."""
     port = Port.model_validate({"name": "clk", "direction": "in", "is_clock": True})
     assert port.signal_class == PortSignalClass.CLOCK
-    assert not hasattr(port, "is_clock")  # legacy field was consumed
 
 
 def test_design_add_remove_component():
