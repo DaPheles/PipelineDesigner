@@ -65,7 +65,7 @@ class _SceneConnectionMixin:
         """Return False if signal types are demonstrably incompatible.
 
         Skips the check when either side uses a generic reference (unknown
-        kind) or when widths are symbolic expressions.
+        kind) or when widths/lsbs are symbolic expressions.
         """
         sk = src.signal_type.kind.lower()
         tk = tgt.signal_type.kind.lower()
@@ -80,6 +80,13 @@ class _SceneConnectionMixin:
                     return False
             except (ValueError, TypeError):
                 pass  # symbolic expression — skip width check
+        # For fixed-point types also check LSB (fractional bit count)
+        if sk in ("sfixed", "ufixed"):
+            try:
+                if int(src.signal_type.lsb) != int(tgt.signal_type.lsb):
+                    return False
+            except (ValueError, TypeError):
+                pass  # symbolic — skip
         return True
 
     def _iface_port_has_connections(self, iface_id: UUID) -> bool:
@@ -462,6 +469,38 @@ class _SceneConnectionMixin:
 
     # ── Connection validation ─────────────────────────────────────────────────
 
+    def _resolve_fp_notation(self, ref: PortReference) -> str | None:
+        """Return the FP notation (e.g. ``'U8.8'``) for a DATA port reference.
+
+        Returns ``None`` when the port is not DATA class, when the format cannot
+        be resolved (symbolic generics), or when the interface port has not yet
+        had its ``signal_type`` explicitly set by the user.
+        """
+        if ref.component_id is not None:
+            comp_item = self._component_items.get(ref.component_id)
+            if comp_item is None:
+                return None
+            port_item = comp_item._port_items.get(ref.port_name)
+            if port_item is None:
+                return None
+            port = port_item.get_port()
+            if port.signal_class != PortSignalClass.DATA:
+                return None
+            generics = comp_item._instance.generic_values
+            return port.signal_type.notation(generics)
+        elif ref.interface_port_id is not None:
+            iport = next(
+                (p for p in self._design.interface_ports
+                 if p.id == ref.interface_port_id),
+                None,
+            )
+            if iport is None or iport.signal_class != PortSignalClass.DATA:
+                return None
+            if iport.signal_type is None:
+                return None  # format not yet explicitly specified
+            return iport.signal_type.notation()
+        return None
+
     def _resolve_signal_class(self, ref: PortReference) -> PortSignalClass | None:
         """Return the PortSignalClass for a port reference, or None if unresolvable."""
         if ref.component_id is not None:
@@ -481,7 +520,7 @@ class _SceneConnectionMixin:
         return None
 
     def _validate_all_connections(self) -> list[str]:
-        """Check every connection for signal-class mismatches.
+        """Check every connection for signal-class and FP-format mismatches.
 
         Marks each ConnectionItem invalid/valid and returns a list of human-readable
         warning strings for any mismatches found.
@@ -492,6 +531,7 @@ class _SceneConnectionMixin:
             src_class = self._resolve_signal_class(conn.source)
             tgt_class = self._resolve_signal_class(conn.target)
 
+            # Signal-class mismatch (highest priority)
             if src_class is not None and tgt_class is not None and src_class != tgt_class:
                 src_label = conn.source.port_name
                 tgt_label = conn.target.port_name
@@ -500,8 +540,22 @@ class _SceneConnectionMixin:
                 )
                 conn_item.set_invalid(True, reason)
                 warnings.append(f"Signal-class mismatch: {reason}")
-            else:
-                conn_item.set_invalid(False)
+                continue
+
+            # FP format mismatch — only checked for DATA↔DATA connections
+            if src_class == PortSignalClass.DATA == tgt_class:
+                src_fmt = self._resolve_fp_notation(conn.source)
+                tgt_fmt = self._resolve_fp_notation(conn.target)
+                if src_fmt is not None and tgt_fmt is not None and src_fmt != tgt_fmt:
+                    reason = f"Format mismatch: {src_fmt} → {tgt_fmt}"
+                    conn_item.set_invalid(True, reason)
+                    warnings.append(
+                        f"Fixed-point format mismatch on "
+                        f"'{conn.source.port_name}' → '{conn.target.port_name}': {reason}"
+                    )
+                    continue
+
+            conn_item.set_invalid(False)
 
         return warnings
 

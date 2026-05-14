@@ -372,9 +372,22 @@ class MainWindow(QMainWindow):
             port = item.get_port()
             component_id = item.get_component_id()
             component_name = ""
+            generic_values: dict = {}
             if component_id:
                 component_name = self._get_component_display_name(component_id)
-            self._property_editor.set_port(port, component_id, component_name)
+                comp_item = self._scene.get_component_item(component_id)
+                if comp_item:
+                    instance = comp_item.get_instance()
+                    definition = comp_item.get_definition()
+                    # Seed with definition defaults so symbolic width/lsb expressions
+                    # can be resolved even when the user hasn't overridden them yet.
+                    if definition:
+                        for gen in definition.generics:
+                            if gen.default_value is not None:
+                                generic_values[gen.name] = gen.default_value
+                    # Instance overrides take precedence
+                    generic_values.update(instance.generic_values)
+            self._property_editor.set_port(port, component_id, component_name, generic_values)
         elif isinstance(item, ComponentItem):
             instance = item.get_instance()
             definition = item.get_definition()

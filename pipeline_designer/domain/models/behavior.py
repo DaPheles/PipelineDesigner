@@ -185,17 +185,33 @@ class SignalType(BaseModel):
                 return f"({self.width})-1"
             return f"({self.width})+({self.lsb})-1"
 
+    @staticmethod
+    def _make_int_generics(generics: dict[str, Any] | None) -> dict[str, int]:
+        """Convert generic values to a ``{name: int}`` dict for expression evaluation.
+
+        Accepts int, float, and numeric strings so that definition defaults
+        (which may be stored as strings in JSON) are also resolved.
+        """
+        result: dict[str, int] = {}
+        for name, v in (generics or {}).items():
+            if isinstance(v, bool):
+                continue  # booleans are subclass of int — exclude them
+            if isinstance(v, (int, float)):
+                result[name] = int(v)
+            elif isinstance(v, str):
+                try:
+                    result[name] = int(float(v))
+                except (ValueError, TypeError):
+                    pass
+        return result
+
     def notation(self, generics: dict[str, Any] | None = None) -> str | None:
         """Return ``'S4.8'`` / ``'U4.8'`` notation when dimensions are concrete."""
         k = self.resolved_kind(generics)
         if k not in _FIXED_POINT_KINDS:
             return None
         try:
-            int_g = {
-                name: int(v)
-                for name, v in (generics or {}).items()
-                if isinstance(v, (int, float))
-            }
+            int_g = self._make_int_generics(generics)
             w = _eval_index(self.width, int_g)
             l = _eval_index(self.lsb,  int_g)
             int_bits  = w + l
@@ -213,7 +229,7 @@ class SignalType(BaseModel):
             return "std_logic"
         if k in _SCALAR_KINDS:
             return k.value
-        int_g = {n: int(v) for n, v in g.items() if isinstance(v, (int, float))}
+        int_g = self._make_int_generics(g)
         try:
             w   = _eval_index(self.width, int_g)
             l   = _eval_index(self.lsb,   int_g)

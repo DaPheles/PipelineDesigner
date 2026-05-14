@@ -30,11 +30,18 @@ from pipeline_designer.domain.models import (
     PortDirection,
     PortSignalClass,
 )
-from pipeline_designer.domain.models.behavior import SignalKind
+from pipeline_designer.domain.models.behavior import SignalKind, SignalType
 from pipeline_designer.domain.models.signal_constraints import (
     ALLOWED_KINDS,
     default_signal_type,
 )
+
+
+def _int_or(s: str, default: int) -> int:
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return default
 
 
 class PropertyEditor(QWidget):
@@ -375,6 +382,7 @@ class PropertyEditor(QWidget):
         port: Port,
         component_id: UUID,
         component_name: str = "",
+        generic_values: dict | None = None,
     ) -> None:
         """Set the port to edit.
 
@@ -382,6 +390,8 @@ class PropertyEditor(QWidget):
             port: The port to edit.
             component_id: ID of the component this port belongs to.
             component_name: Display name of the parent component.
+            generic_values: Instance generic values used to resolve symbolic
+                width/lsb expressions (e.g. ``{'FRAC_BITS': 8}``).
         """
         self._clear_content()
         self._current_instance = None
@@ -405,11 +415,22 @@ class PropertyEditor(QWidget):
 
         # Signal type (read-only)
         st = port.signal_type
-        notation = st.notation()
-        type_text = notation if notation else st.kind
+        g = generic_values or {}
+        is_data = port.signal_class == PortSignalClass.DATA
+        # For DATA ports show just the kind ("ufixed"); for others show the VHDL type.
+        type_text = st.kind if is_data else st.to_vhdl_type(g)
         type_label = QLabel(type_text)
         type_label.setStyleSheet("color: #888;")
         self._content_layout.addRow("Signal Type:", type_label)
+
+        # Format (derived from width/lsb — DATA ports only)
+        if is_data:
+            notation = st.notation(g)
+            vhdl = st.to_vhdl_type(g)
+            fmt_text = f"{notation}  ·  {vhdl}" if notation else vhdl
+            fmt_label = QLabel(fmt_text)
+            fmt_label.setStyleSheet("color: #89dceb; font-family: monospace;")
+            self._content_layout.addRow("Format:", fmt_label)
 
         # Signal class (editable combo)
         sc_combo = QComboBox()
@@ -549,46 +570,79 @@ class PropertyEditor(QWidget):
         signal_class: PortSignalClass,
         current_type: str,
     ) -> None:
-        """Replace the Signal Type row with the appropriate widget for signal_class.
+        """Replace the Signal Type row(s) with appropriate widgets for signal_class.
 
         Clock/reset/control → read-only label (type is fixed or auto-selected).
-        Data → editable combo limited to sfixed/ufixed.
+        Data → editable combo (sfixed/ufixed) + Width/LSB spinboxes + Format label.
         """
-        # Remove existing type widget row if present
-        old_w = self._property_widgets.pop("interface_port_type", None)
-        if old_w is not None:
-            for i in range(self._content_layout.rowCount()):
-                field = self._content_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
-                if field and field.widget() is old_w:
-                    self._content_layout.removeRow(i)
-                    break
+        # Remove any existing type-related rows (in reverse order to preserve indices)
+        for key in ("interface_port_format", "interface_port_lsb",
+                    "interface_port_width", "interface_port_type"):
+            old_w = self._property_widgets.pop(key, None)
+            if old_w is not None:
+                for i in range(self._content_layout.rowCount()):
+                    field = self._content_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+                    if field and field.widget() is old_w:
+                        self._content_layout.removeRow(i)
+                        break
 
         allowed = ALLOWED_KINDS[signal_class]
         is_data = signal_class == PortSignalClass.DATA
 
         if is_data:
-            # Editable combo: sfixed / ufixed
+            # Determine current width/lsb from signal_type (if already set)
+            iport = self._current_interface_port
+            if iport is not None and iport.signal_type is not None:
+                init_width = _int_or(iport.signal_type.width, 16)
+                init_lsb   = _int_or(iport.signal_type.lsb, -8)
+            else:
+                init_width = 16
+                init_lsb   = -8
+
+            # Kind combo: sfixed / ufixed
             type_combo = QComboBox()
             type_combo.addItems(self._data_data_types)
-            if current_type in allowed:
-                idx = type_combo.findText(current_type)
-                if idx >= 0:
-                    type_combo.setCurrentIndex(idx)
-            else:
-                type_combo.setCurrentIndex(0)
-                # Correct the model too
-                if self._current_interface_port:
-                    self._current_interface_port.data_type = type_combo.currentText()
+            kind_to_use = current_type if current_type in allowed else self._data_data_types[0]
+            idx = type_combo.findText(kind_to_use)
+            if idx >= 0:
+                type_combo.setCurrentIndex(idx)
+            if iport and iport.data_type != kind_to_use:
+                iport.data_type = kind_to_use
             type_combo.currentTextChanged.connect(self._on_interface_port_type_changed)
-            # Insert after the signal-class row (row index 1, 0-based)
             self._content_layout.insertRow(2, "Signal Type:", type_combo)
             self._property_widgets["interface_port_type"] = type_combo
+
+            # Width spinbox
+            width_spin = QSpinBox()
+            width_spin.setRange(1, 256)
+            width_spin.setValue(init_width)
+            width_spin.valueChanged.connect(self._on_interface_port_fp_changed)
+            self._content_layout.insertRow(3, "Width (bits):", width_spin)
+            self._property_widgets["interface_port_width"] = width_spin
+
+            # LSB spinbox (negative = fractional bits)
+            lsb_spin = QSpinBox()
+            lsb_spin.setRange(-256, 0)
+            lsb_spin.setValue(init_lsb)
+            lsb_spin.setToolTip("LSB position: 0 = integer, negative = fractional bits")
+            lsb_spin.valueChanged.connect(self._on_interface_port_fp_changed)
+            self._content_layout.insertRow(4, "LSB:", lsb_spin)
+            self._property_widgets["interface_port_lsb"] = lsb_spin
+
+            # Format label (derived, read-only)
+            format_lbl = QLabel()
+            format_lbl.setStyleSheet("color: #89dceb; font-family: monospace;")
+            self._content_layout.insertRow(5, "Format:", format_lbl)
+            self._property_widgets["interface_port_format"] = format_lbl
+
+            # Initialise signal_type on model and update label
+            self._sync_interface_port_signal_type()
+            self._update_interface_format_label()
         else:
             # Fixed, read-only label
             canonical = self._canonical_type_for_class(signal_class)
             type_label = QLabel(canonical)
             type_label.setStyleSheet("color: #888;")
-            # Correct the model if needed
             if self._current_interface_port and self._current_interface_port.data_type != canonical:
                 self._current_interface_port.data_type = canonical
                 self.interface_port_changed.emit(
@@ -614,6 +668,57 @@ class PropertyEditor(QWidget):
                 self.interface_port_changed.emit(
                     self._current_interface_port.id, "data_type", new_type
                 )
+        # Keep signal_type.kind in sync and refresh format label
+        self._sync_interface_port_signal_type()
+        self._update_interface_format_label()
+
+    def _on_interface_port_fp_changed(self) -> None:
+        """Handle Width or LSB spinbox change for a DATA interface port."""
+        self._sync_interface_port_signal_type()
+        self._update_interface_format_label()
+
+    def _sync_interface_port_signal_type(self) -> None:
+        """Rebuild interface_port.signal_type from current kind/width/lsb widgets."""
+        if not self._current_interface_port:
+            return
+        kind_w  = self._property_widgets.get("interface_port_type")
+        width_w = self._property_widgets.get("interface_port_width")
+        lsb_w   = self._property_widgets.get("interface_port_lsb")
+        if not (isinstance(kind_w, QComboBox)
+                and isinstance(width_w, QSpinBox)
+                and isinstance(lsb_w, QSpinBox)):
+            return
+        st = SignalType(
+            kind=kind_w.currentText(),
+            width=str(width_w.value()),
+            lsb=str(lsb_w.value()),
+        )
+        self._current_interface_port.signal_type = st
+        self.interface_port_changed.emit(
+            self._current_interface_port.id, "signal_type", st
+        )
+
+    def _update_interface_format_label(self) -> None:
+        """Recompute and display the FP format notation for a DATA interface port."""
+        lbl = self._property_widgets.get("interface_port_format")
+        if not isinstance(lbl, QLabel):
+            return
+        kind_w  = self._property_widgets.get("interface_port_type")
+        width_w = self._property_widgets.get("interface_port_width")
+        lsb_w   = self._property_widgets.get("interface_port_lsb")
+        if not (isinstance(kind_w, QComboBox)
+                and isinstance(width_w, QSpinBox)
+                and isinstance(lsb_w, QSpinBox)):
+            lbl.setText("")
+            return
+        st = SignalType(
+            kind=kind_w.currentText(),
+            width=str(width_w.value()),
+            lsb=str(lsb_w.value()),
+        )
+        notation = st.notation()
+        vhdl = st.to_vhdl_type()
+        lbl.setText(f"{notation}  ·  {vhdl}" if notation else vhdl)
 
     def _on_interface_port_signal_class_changed(self, value: str) -> None:
         if not self._current_interface_port:
