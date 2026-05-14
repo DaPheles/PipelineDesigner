@@ -229,7 +229,7 @@ class _PortHandle(QGraphicsEllipseItem):
 
     def paint(self, painter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._is_clock:
+        if self._signal_class == PortSignalClass.CLOCK:
             color = self._COLORS.get(self._direction, QColor("#888888"))
             painter.setBrush(QBrush(color))
             painter.setPen(QPen(color.darker(150), 1.5))

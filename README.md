@@ -100,7 +100,7 @@ A port on a `ComponentDefinition`. Position is relative to the component's top-l
 | `position` | `tuple[int,int] \| None` | `None` |
 | `signal_class` | `PortSignalClass` | `data` |
 
-Legacy `is_clock`/`is_reset` and `data_type`/`vector_range` fields are transparently migrated on load.
+Legacy `data_type`/`vector_range` fields are transparently migrated on load.
 
 ### `ComponentInstance` (`instance.py`)
 

@@ -8,11 +8,6 @@ def test_port_signal_class_default():
     assert port.signal_class == PortSignalClass.DATA
 
 
-def test_port_legacy_migration_is_clock():
-    """Old JSON with is_clock=true must migrate to signal_class=clock."""
-    port = Port.model_validate({"name": "clk", "direction": "in", "is_clock": True})
-    assert port.signal_class == PortSignalClass.CLOCK
-
 
 def test_design_add_remove_component():
     design = Design()

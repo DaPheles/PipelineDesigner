@@ -15,8 +15,7 @@
                 0,
                 2
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         },
         {
             "name": "b",
@@ -30,8 +29,7 @@
                 0,
                 4
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         },
         {
             "name": "cin",
@@ -45,8 +43,7 @@
                 0,
                 5
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         },
         {
             "name": "sum",
@@ -60,8 +57,7 @@
                 4,
                 3
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         },
         {
             "name": "cout",
@@ -75,8 +71,7 @@
                 4,
                 5
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         }
     ],
     "generics": [

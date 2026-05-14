@@ -50,8 +50,6 @@ class Port(BaseModel):
     corner.  Signal type information lives entirely in ``signal_type``; the
     old ``data_type`` / ``vector_range`` fields are accepted on load for
     backward compatibility and converted transparently.
-    The old ``is_clock`` / ``is_reset`` boolean fields are also migrated
-    transparently to ``signal_class``.
     """
 
     name:         str             = Field(..., description="Port name")
@@ -69,24 +67,11 @@ class Port(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _migrate_legacy_fields(cls, data: Any) -> Any:
-        """Convert old data_type/vector_range and is_clock/is_reset fields."""
+        """Convert old data_type/vector_range fields."""
         if not isinstance(data, dict):
             return data
 
         data = dict(data)  # don't mutate the original
-
-        # Migrate is_clock / is_reset → signal_class (only when signal_class absent)
-        if "signal_class" not in data:
-            if data.pop("is_clock", False):
-                data["signal_class"] = PortSignalClass.CLOCK.value
-            elif data.pop("is_reset", False):
-                data["signal_class"] = PortSignalClass.RESET.value
-            else:
-                data.pop("is_clock", None)
-                data.pop("is_reset", None)
-        else:
-            data.pop("is_clock", None)
-            data.pop("is_reset", None)
 
         if "signal_type" in data:
             return data
@@ -115,14 +100,6 @@ class Port(BaseModel):
             data["signal_type"] = {"kind": kind}
 
         return data
-
-    @property
-    def is_clock(self) -> bool:
-        return self.signal_class == PortSignalClass.CLOCK
-
-    @property
-    def is_reset(self) -> bool:
-        return self.signal_class == PortSignalClass.RESET
 
     def get_pixel_position(self, grid: GridConfig | None = None) -> tuple[float, float]:
         if grid is None:

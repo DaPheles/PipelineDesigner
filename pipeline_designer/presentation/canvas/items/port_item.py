@@ -239,7 +239,7 @@ class PortItem(QGraphicsEllipseItem):
     ) -> None:
         """Paint the port item."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._port.is_clock:
+        if self._port.signal_class == PortSignalClass.CLOCK:
             color = self._get_port_color()
             painter.setBrush(QBrush(color))
             painter.setPen(QPen(color.darker(150), 2))

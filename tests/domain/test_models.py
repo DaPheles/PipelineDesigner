@@ -4,7 +4,6 @@ Covers the signal_class persistence and model invariants that were the root
 cause of the bugs fixed during the session:
 - per-instance port_signal_classes field
 - signal_class serialisation roundtrip
-- legacy is_clock / is_reset field migration
 - design mutation (add/remove components and connections)
 """
 
@@ -61,24 +60,6 @@ class TestPort:
     def test_explicit_signal_class(self):
         port = Port(name="clk", direction=PortDirection.IN, signal_class=PortSignalClass.CLOCK)
         assert port.signal_class == PortSignalClass.CLOCK
-        assert port.is_clock
-
-    def test_legacy_is_clock_migration(self):
-        """Old JSON with is_clock=true must be migrated to signal_class=clock."""
-        port = Port.model_validate({"name": "clk", "direction": "in", "is_clock": True})
-        assert port.signal_class == PortSignalClass.CLOCK
-
-    def test_legacy_is_reset_migration(self):
-        port = Port.model_validate({"name": "rst", "direction": "in", "is_reset": True})
-        assert port.signal_class == PortSignalClass.RESET
-
-    def test_legacy_migration_does_not_override_explicit_class(self):
-        """When signal_class is already present, is_clock must be ignored."""
-        port = Port.model_validate({
-            "name": "clk", "direction": "in",
-            "signal_class": "data", "is_clock": True,
-        })
-        assert port.signal_class == PortSignalClass.DATA
 
     def test_model_copy_is_independent(self):
         """model_copy() must produce a separate object — mutating it must not affect original."""
@@ -147,13 +128,6 @@ class TestInterfacePort:
             name="clk", direction=InterfaceDirection.INPUT,
             signal_class=PortSignalClass.CLOCK,
         )
-        assert port.signal_class == PortSignalClass.CLOCK
-        assert port.is_clock
-
-    def test_legacy_is_clock_migration(self):
-        port = InterfacePort.model_validate({
-            "name": "clk", "direction": "input", "is_clock": True,
-        })
         assert port.signal_class == PortSignalClass.CLOCK
 
     def test_signal_class_survives_design_roundtrip(self):

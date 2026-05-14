@@ -15,8 +15,7 @@
                 2,
                 6
             ],
-            "is_clock": true,
-            "is_reset": false
+            "signal_class": "clock"
         },
         {
             "name": "x",
@@ -30,8 +29,7 @@
                 0,
                 3
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         },
         {
             "name": "y",
@@ -45,8 +43,7 @@
                 4,
                 3
             ],
-            "is_clock": false,
-            "is_reset": false
+            "signal_class": "data"
         }
     ],
     "generics": [

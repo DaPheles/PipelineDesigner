@@ -114,7 +114,7 @@ class _SceneConnectionMixin:
                 return False
 
             # Signal kind / width compatibility (data and control ports only)
-            if src.is_clock or src.is_reset:
+            if src.signal_class in (PortSignalClass.CLOCK, PortSignalClass.RESET):
                 pass  # no type check for clock/reset
             elif not self._signal_types_compatible(src, tgt):
                 return False

@@ -1,55 +1,73 @@
 {
-    "name": "Mux2",
-    "category": "primitives",
-    "description": "2:1 multiplexer",
-    "ports": [
-        {
-            "name": "sel",
-            "direction": "in",
-            "signal_type": {"kind": "std_logic"},
-            "position": [2, 0],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "a",
-            "direction": "in",
-            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
-            "position": [0, 2],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "b",
-            "direction": "in",
-            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
-            "position": [0, 4],
-            "is_clock": false,
-            "is_reset": false
-        },
-        {
-            "name": "y",
-            "direction": "out",
-            "signal_type": {"kind": "std_logic_vector", "width": "WIDTH", "lsb": "0"},
-            "position": [4, 3],
-            "is_clock": false,
-            "is_reset": false
-        }
-    ],
-    "generics": [
-        {
-            "name": "WIDTH",
-            "data_type": "integer",
-            "default_value": 8
-        }
-    ],
-    "visual": {
-        "width": 4,
-        "height": 6,
-        "color": "#70ad47"
+  "name": "Mux2",
+  "category": "primitives",
+  "description": "2:1 multiplexer",
+  "ports": [
+    {
+      "name": "sel",
+      "direction": "in",
+      "signal_type": {
+        "kind": "std_logic"
+      },
+      "position": [
+        2,
+        0
+      ]
     },
-    "latency": 0,
-    "behavior": {
-        "code": "return a if sel else b"
+    {
+      "name": "a",
+      "direction": "in",
+      "signal_type": {
+        "kind": "std_logic_vector",
+        "width": "WIDTH",
+        "lsb": "0"
+      },
+      "position": [
+        0,
+        2
+      ]
+    },
+    {
+      "name": "b",
+      "direction": "in",
+      "signal_type": {
+        "kind": "std_logic_vector",
+        "width": "WIDTH",
+        "lsb": "0"
+      },
+      "position": [
+        0,
+        4
+      ]
+    },
+    {
+      "name": "y",
+      "direction": "out",
+      "signal_type": {
+        "kind": "std_logic_vector",
+        "width": "WIDTH",
+        "lsb": "0"
+      },
+      "position": [
+        4,
+        3
+      ]
     }
+  ],
+  "generics": [
+    {
+      "name": "WIDTH",
+      "data_type": "integer",
+      "default_value": 8
+    }
+  ],
+  "visual": {
+    "width": 4,
+    "height": 6,
+    "color": "#70ad47"
+  },
+  "latency": 0,
+  "behavior": {
+    "code": "return a if sel else b"
+  }
 }

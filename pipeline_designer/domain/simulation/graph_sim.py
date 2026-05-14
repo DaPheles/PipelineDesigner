@@ -40,7 +40,7 @@ from uuid import UUID
 
 import numpy as np
 
-from pipeline_designer.domain.models.component import ComponentDefinition
+from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection
 from pipeline_designer.domain.simulation.executor import BehaviorExecutor
@@ -136,7 +136,7 @@ class DesignSimulator:
                 self._regs.add(inst.id)
             else:
                 in_ports  = [p.name for p in defn.get_input_ports()
-                             if not p.is_clock and not p.is_reset]
+                             if p.signal_class not in (PortSignalClass.CLOCK, PortSignalClass.RESET)]
                 out_ports = [p.name for p in defn.get_output_ports()]
                 self._exec_input_ports[inst.id]  = in_ports
                 self._exec_output_ports[inst.id] = out_ports

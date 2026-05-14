@@ -600,7 +600,7 @@ class ComponentItem(QGraphicsRectItem):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(clock_color))
         for port_item in self._port_items.values():
-            if not port_item.get_port().is_clock:
+            if port_item.get_port().signal_class != PortSignalClass.CLOCK:
                 continue
             edge = port_item._edge
             if edge == "none":

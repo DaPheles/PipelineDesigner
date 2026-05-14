@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models.component import ComponentDefinition
+from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection, InterfacePort
 from pipeline_designer.domain.simulation.graph_sim import DesignSimulator
@@ -101,7 +101,7 @@ class DesignSimulationPanel(QWidget):
         """
         design = self._design_getter()
         self._input_ports  = [p for p in design.get_input_interfaces()
-                               if not p.is_clock]
+                               if p.signal_class != PortSignalClass.CLOCK]
         self._output_ports = design.get_output_interfaces()
         self._rebuild_input_table()
         self._waveform.set_data([], 0)
@@ -264,7 +264,7 @@ class DesignSimulationPanel(QWidget):
             return
 
         design = self._design_getter()
-        in_ports  = [p for p in design.get_input_interfaces() if not p.is_clock]
+        in_ports  = [p for p in design.get_input_interfaces() if p.signal_class != PortSignalClass.CLOCK]
         out_ports = design.get_output_interfaces()
 
         if not in_ports and not out_ports:

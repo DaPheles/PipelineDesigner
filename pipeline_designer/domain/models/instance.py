@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from pipeline_designer.domain.models.component import PortSignalClass
 
@@ -42,32 +42,6 @@ class InterfacePort(BaseModel):
         default=None, description="Internal port name this interface connects to"
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict) or "signal_class" in data:
-            if isinstance(data, dict):
-                data = dict(data)
-                data.pop("is_clock", None)
-                data.pop("is_reset", None)
-            return data
-        data = dict(data)
-        if data.pop("is_clock", False):
-            data["signal_class"] = PortSignalClass.CLOCK.value
-        elif data.pop("is_reset", False):
-            data["signal_class"] = PortSignalClass.RESET.value
-        else:
-            data.pop("is_clock", None)
-            data.pop("is_reset", None)
-        return data
-
-    @property
-    def is_clock(self) -> bool:
-        return self.signal_class == PortSignalClass.CLOCK
-
-    @property
-    def is_reset(self) -> bool:
-        return self.signal_class == PortSignalClass.RESET
 
 
 class PortReference(BaseModel):

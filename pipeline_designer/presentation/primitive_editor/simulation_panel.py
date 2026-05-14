@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models import Generic, Port, PortDirection
+from pipeline_designer.domain.models import Generic, Port, PortDirection, PortSignalClass
 from pipeline_designer.domain.models.behavior import SignalKind, _eval_index
 from pipeline_designer.domain.simulation.executor import BehaviorExecutor
 from pipeline_designer.presentation.shared.waveform import (
@@ -279,7 +279,7 @@ class SimulationPanel(QWidget):
     def _rebuild_input_table(self) -> None:
         in_ports = [
             p for p in self._ports
-            if p.direction == PortDirection.IN and not p.is_clock
+            if p.direction == PortDirection.IN and p.signal_class != PortSignalClass.CLOCK
         ]
         # Preserve existing cell values by port name before clearing
         old_values: dict[str, list[str]] = {}
@@ -346,7 +346,7 @@ class SimulationPanel(QWidget):
         self._status.setVisible(False)
 
         sim_generics = self._get_sim_generics()
-        in_ports  = [p for p in self._ports if p.direction == PortDirection.IN  and not p.is_clock]
+        in_ports  = [p for p in self._ports if p.direction == PortDirection.IN  and p.signal_class != PortSignalClass.CLOCK]
         out_ports = [p for p in self._ports if p.direction == PortDirection.OUT]
 
         if not in_ports and not out_ports:
@@ -379,7 +379,7 @@ class SimulationPanel(QWidget):
                 self._show_error("No behavior code to simulate.")
                 return
 
-            exec_ports = [p for p in in_ports if not p.is_reset]
+            exec_ports = [p for p in in_ports if p.signal_class != PortSignalClass.RESET]
             try:
                 executor = BehaviorExecutor(
                     code_body=code,
