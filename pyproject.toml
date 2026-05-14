@@ -2,7 +2,7 @@
 name = "pipeline_designer"
 version = "0.1.0"
 description = "A graphical FPGA/ASIC pipeline design tool"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Andre Koehler <pheles@gmx.de>"]
 readme = "README.md"
 packages = [{include = "pipeline_designer"}]
 
@@ -11,7 +11,7 @@ python = "^3.11"
 PySide6 = "^6.6.0"
 pydantic = "^2.5.0"
 
-[tool.poetry.group.dev.dependencies]
+[tool.poetry.dev-dependencies]
 pytest = "^7.4.0"
 
 [tool.poetry.scripts]

@@ -216,16 +216,16 @@ class ComponentItem(QGraphicsRectItem):
         if self._is_composite and self._composite_design:
             composite_y_offset = self._compute_composite_y_offset()
 
-        for port in self._definition.ports:
+        for orig_port in self._definition.ports:
             # Always copy the port so each instance holds an independent object.
             # Without this, mutating one instance's port signal_class would
             # silently modify every other instance of the same component type.
-            sc_override = self._instance.port_signal_classes.get(port.name)
+            sc_override = self._instance.port_signal_classes.get(orig_port.name)
             try:
                 update = {"signal_class": PortSignalClass(sc_override)} if sc_override else {}
-                port = port.model_copy(update=update)
+                port = orig_port.model_copy(update=update)
             except ValueError:
-                port = port.model_copy()
+                port = orig_port.model_copy()
             port_item = PortItem(port, self)
 
             if self._is_composite:
@@ -235,14 +235,14 @@ class ComponentItem(QGraphicsRectItem):
                 # in the design coordinate system, not the component view system.
                 header_h = self._composite_header_h()
                 sw = float(self._grid.size)
-                x_px = sw / 2 if port.direction == PortDirection.IN else rect.width() - sw / 2
+                x_px = sw / 2 if orig_port.direction == PortDirection.IN else rect.width() - sw / 2
 
                 # Resolve y from the matching interface port in the composite design
                 iface = next(
                     (
                         ip
                         for ip in self._composite_design.interface_ports
-                        if ip.name == port.name
+                        if ip.name == orig_port.name
                     ),
                     None,
                 ) if self._composite_design else None
@@ -254,27 +254,27 @@ class ComponentItem(QGraphicsRectItem):
                     y_px = header_h + self._grid.to_pixels(iface.position[1])
                 else:
                     # Fallback: distribute evenly in body area
-                    if port.direction == PortDirection.IN:
-                        idx = input_ports.index(port)
+                    if orig_port.direction == PortDirection.IN:
+                        idx = input_ports.index(orig_port)
                         y_px = self._calculate_composite_port_y(
                             idx, len(input_ports), rect.height(), header_h
                         )
                     else:
-                        idx = output_ports.index(port)
+                        idx = output_ports.index(orig_port)
                         y_px = self._calculate_composite_port_y(
                             idx, len(output_ports), rect.height(), header_h
                         )
 
-            elif port.position is not None:
-                x_px, y_px = port.get_pixel_position(self._grid)
+            elif orig_port.position is not None:
+                x_px, y_px = orig_port.get_pixel_position(self._grid)
 
             else:
-                if port.direction == PortDirection.IN:
-                    idx = input_ports.index(port)
+                if orig_port.direction == PortDirection.IN:
+                    idx = input_ports.index(orig_port)
                     x_px = 0
                     y_px = self._calculate_auto_port_y(idx, len(input_ports), height_units)
                 else:
-                    idx = output_ports.index(port)
+                    idx = output_ports.index(orig_port)
                     x_px = rect.width()
                     y_px = self._calculate_auto_port_y(idx, len(output_ports), height_units)
 
