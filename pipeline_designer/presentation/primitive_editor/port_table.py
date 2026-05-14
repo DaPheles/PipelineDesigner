@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -18,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models import Port, PortDirection
+from pipeline_designer.domain.models import Port, PortDirection, PortSignalClass
 from pipeline_designer.domain.models.behavior import SignalKind, SignalType
 
 # Ordered list of concrete kind choices shown in the combo.
@@ -43,11 +42,19 @@ _SCALAR_KIND_VALUES: frozenset[str] = frozenset({
 })
 
 
+_SIGNAL_CLASS_OPTIONS: list[str] = [
+    PortSignalClass.DATA.value,
+    PortSignalClass.CONTROL.value,
+    PortSignalClass.RESET.value,
+    PortSignalClass.CLOCK.value,
+]
+
+
 class PortTable(QWidget):
     """Editable table of port definitions for a primitive component.
 
     Columns:
-        Name | Direction | Kind | Width | LSB | Notation | X | Y | Clk | Rst
+        Name | Direction | Kind | Width | LSB | Notation | X | Y | Class
 
     Kind is a combo of ``SignalKind`` values and is editable so a type-generic
     name (e.g. ``SIG_TYPE``) can be entered directly.
@@ -56,25 +63,27 @@ class PortTable(QWidget):
 
     Notation (e.g. ``S4.8``) is a read-only derived label, shown when both
     Width and LSB resolve to concrete integers.
+
+    Class is a fixed combo selecting the signal's semantic role
+    (data / control / reset / clock).
     """
 
     data_changed = Signal()
     # (port_name, x, y) — emitted when spinbox position changes
     position_edited = Signal(str, int, int)
 
-    _COL_NAME     = 0
-    _COL_DIR      = 1
-    _COL_KIND     = 2
-    _COL_WIDTH    = 3
-    _COL_LSB      = 4
-    _COL_NOTATION = 5
-    _COL_X        = 6
-    _COL_Y        = 7
-    _COL_CLK      = 8
-    _COL_RST      = 9
+    _COL_NAME         = 0
+    _COL_DIR          = 1
+    _COL_KIND         = 2
+    _COL_WIDTH        = 3
+    _COL_LSB          = 4
+    _COL_NOTATION     = 5
+    _COL_X            = 6
+    _COL_Y            = 7
+    _COL_SIGNAL_CLASS = 8
     _HEADERS = [
         "Name", "Direction", "Kind", "Width", "LSB",
-        "Notation", "X", "Y", "Clk", "Rst",
+        "Notation", "X", "Y", "Class",
     ]
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -117,7 +126,7 @@ class PortTable(QWidget):
         hdr.setSectionResizeMode(self._COL_WIDTH,    QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(self._COL_LSB,      QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(self._COL_NOTATION, QHeaderView.ResizeMode.ResizeToContents)
-        for col in (self._COL_DIR, self._COL_X, self._COL_Y, self._COL_CLK, self._COL_RST):
+        for col in (self._COL_DIR, self._COL_X, self._COL_Y, self._COL_SIGNAL_CLASS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
@@ -216,27 +225,20 @@ class PortTable(QWidget):
             spin.valueChanged.connect(lambda _, r=row: self._on_position_spin_changed(r))
             self._table.setCellWidget(row, col, spin)
 
-        # Clock / Reset checkboxes
-        for col, flag in (
-            (self._COL_CLK, port.is_clock if port else False),
-            (self._COL_RST, port.is_reset if port else False),
-        ):
-            self._table.setCellWidget(row, col, self._make_checkbox(flag))
+        # Signal class combo
+        sc_combo = QComboBox()
+        for opt in _SIGNAL_CLASS_OPTIONS:
+            sc_combo.addItem(opt)
+        sc_val = port.signal_class.value if port else PortSignalClass.DATA.value
+        idx = sc_combo.findText(sc_val)
+        if idx >= 0:
+            sc_combo.setCurrentIndex(idx)
+        sc_combo.currentIndexChanged.connect(self._emit_changed)
+        self._table.setCellWidget(row, self._COL_SIGNAL_CLASS, sc_combo)
 
         # Initialise enabled/notation state
         self._update_range_state(row, kind_val)
         return row
-
-    def _make_checkbox(self, checked: bool) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        cb = QCheckBox()
-        cb.setChecked(checked)
-        cb.stateChanged.connect(self._emit_changed)
-        layout.addWidget(cb)
-        layout.setAlignment(cb, Qt.AlignmentFlag.AlignCenter)
-        return container
 
     def _on_kind_changed(self, row: int, text: str) -> None:
         self._update_range_state(row, text)
@@ -321,12 +323,14 @@ class PortTable(QWidget):
     def _get_spin(self, row: int, col: int) -> QSpinBox:
         return self._table.cellWidget(row, col)  # type: ignore[return-value]
 
-    def _get_checkbox(self, row: int, col: int) -> bool:
-        container = self._table.cellWidget(row, col)
-        if container:
-            cb = container.findChild(QCheckBox)
-            return cb.isChecked() if cb else False
-        return False
+    def _get_signal_class(self, row: int) -> PortSignalClass:
+        w = self._table.cellWidget(row, self._COL_SIGNAL_CLASS)
+        if isinstance(w, QComboBox):
+            try:
+                return PortSignalClass(w.currentText())
+            except ValueError:
+                pass
+        return PortSignalClass.DATA
 
     def _row_to_port(self, row: int) -> Port | None:
         name = self._get_name(row)
@@ -360,6 +364,5 @@ class PortTable(QWidget):
             direction=direction,
             signal_type=signal_type,
             position=(x, y),
-            is_clock=self._get_checkbox(row, self._COL_CLK),
-            is_reset=self._get_checkbox(row, self._COL_RST),
+            signal_class=self._get_signal_class(row),
         )

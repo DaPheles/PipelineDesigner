@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models import ComponentDefinition, Port, PortDirection
+from pipeline_designer.domain.models import ComponentDefinition, Port, PortDirection, PortSignalClass
 
 CELL = 30       # pixels per grid unit
 HEADER_H = CELL  # title bar is 1 grid unit tall, matching main canvas convention
@@ -91,7 +91,7 @@ class _PortHandle(QGraphicsEllipseItem):
         gy: int,
         direction: PortDirection,
         scene: "_PrimitiveScene",
-        is_clock: bool = False,
+        signal_class: PortSignalClass = PortSignalClass.DATA,
     ) -> None:
         r = self.RADIUS
         super().__init__(-r, -r, 2 * r, 2 * r)
@@ -99,7 +99,7 @@ class _PortHandle(QGraphicsEllipseItem):
         self._gx = gx
         self._gy = gy
         self._direction = direction
-        self._is_clock = is_clock
+        self._signal_class = signal_class
         self._scene_ref = scene
         self._dragging = False
         self._edge: str = "none"
@@ -461,7 +461,7 @@ class _PrimitiveScene(QGraphicsScene):
     def _build_port_handles(self, ports: list[Port], positions: dict[str, tuple[int, int]]) -> None:
         for port in ports:
             gx, gy = positions[port.name]
-            handle = _PortHandle(port.name, gx, gy, port.direction, self, is_clock=port.is_clock)
+            handle = _PortHandle(port.name, gx, gy, port.direction, self, signal_class=port.signal_class)
             self.addItem(handle)
             self._port_handles[port.name] = handle
 
@@ -480,9 +480,9 @@ class _PrimitiveScene(QGraphicsScene):
         return positions
 
     def _port_border(self, port: Port) -> str:
-        if port.is_clock:
+        if port.signal_class == PortSignalClass.CLOCK:
             return "bottom"
-        if port.is_reset:
+        if port.signal_class == PortSignalClass.RESET:
             return "top"
         if port.direction == PortDirection.IN:
             return "left"
@@ -516,7 +516,7 @@ class _PrimitiveScene(QGraphicsScene):
         r = 10.0
         border_color = QColor("#cccccc")  # matches _BODY_BORDER
         for handle in self._port_handles.values():
-            if not handle._is_clock:
+            if handle._signal_class != PortSignalClass.CLOCK:
                 continue
             cx, cy = handle.pos().x(), handle.pos().y()
             pts = self._clock_triangle_pts(cx, cy, handle._edge, r)

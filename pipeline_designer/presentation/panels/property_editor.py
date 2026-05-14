@@ -28,6 +28,7 @@ from pipeline_designer.domain.models import (
     InterfacePort,
     Port,
     PortDirection,
+    PortSignalClass,
 )
 
 
@@ -456,16 +457,17 @@ class PropertyEditor(QWidget):
             pos_label.setStyleSheet("color: #888;")
             self._content_layout.addRow("Position:", pos_label)
 
-        # Special flags (read-only)
-        if port.is_clock:
-            clock_label = QLabel("Yes")
-            clock_label.setStyleSheet("color: #5b9bd5; font-weight: bold;")
-            self._content_layout.addRow("Clock:", clock_label)
-
-        if port.is_reset:
-            reset_label = QLabel("Yes")
-            reset_label.setStyleSheet("color: #c45911; font-weight: bold;")
-            self._content_layout.addRow("Reset:", reset_label)
+        # Signal class (read-only)
+        sc = port.signal_class
+        sc_colors = {
+            PortSignalClass.CLOCK:   "#5b9bd5",
+            PortSignalClass.RESET:   "#c45911",
+            PortSignalClass.CONTROL: "#9b59b6",
+            PortSignalClass.DATA:    "#888888",
+        }
+        sc_label = QLabel(sc.value)
+        sc_label.setStyleSheet(f"color: {sc_colors.get(sc, '#888888')}; font-weight: bold;")
+        self._content_layout.addRow("Signal class:", sc_label)
 
     def _on_port_name_changed(self, name: str) -> None:
         """Handle port name change."""

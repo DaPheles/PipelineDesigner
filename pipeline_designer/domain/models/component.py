@@ -28,6 +28,21 @@ class PortDirection(str, Enum):
     INOUT = "inout"
 
 
+class PortSignalClass(str, Enum):
+    """Semantic classification of a port's signal, driving connection rules and VHDL generation.
+
+    - CLOCK:   Must only connect to other clock ports; driven by clock routing.
+    - RESET:   Controls reset behaviour; must only connect to other reset ports.
+    - CONTROL: Carries control/enable signals; must have a defined reset condition in VHDL.
+    - DATA:    General data path; no mandatory reset condition.
+    """
+
+    CLOCK   = "clock"
+    RESET   = "reset"
+    CONTROL = "control"
+    DATA    = "data"
+
+
 class Port(BaseModel):
     """A port on a component definition.
 
@@ -35,26 +50,47 @@ class Port(BaseModel):
     corner.  Signal type information lives entirely in ``signal_type``; the
     old ``data_type`` / ``vector_range`` fields are accepted on load for
     backward compatibility and converted transparently.
+    The old ``is_clock`` / ``is_reset`` boolean fields are also migrated
+    transparently to ``signal_class``.
     """
 
-    name:        str            = Field(..., description="Port name")
-    direction:   PortDirection  = Field(..., description="Port direction")
-    signal_type: SignalType     = Field(
+    name:         str             = Field(..., description="Port name")
+    direction:    PortDirection   = Field(..., description="Port direction")
+    signal_type:  SignalType      = Field(
         default_factory=lambda: SignalType(kind="std_logic"),
         description="Signal type (kind, width, lsb)",
     )
-    position:  tuple[int, int] | None = Field(default=None, description="Grid-unit position (x, y)")
-    is_clock:  bool = Field(default=False, description="Whether this is a clock port")
-    is_reset:  bool = Field(default=False, description="Whether this is a reset port")
+    position:     tuple[int, int] | None = Field(default=None, description="Grid-unit position (x, y)")
+    signal_class: PortSignalClass = Field(
+        default=PortSignalClass.DATA,
+        description="Signal classification: clock, reset, control, or data",
+    )
 
     @model_validator(mode="before")
     @classmethod
     def _migrate_legacy_fields(cls, data: Any) -> Any:
-        """Convert old data_type / vector_range fields to signal_type."""
-        if not isinstance(data, dict) or "signal_type" in data:
+        """Convert old data_type/vector_range and is_clock/is_reset fields."""
+        if not isinstance(data, dict):
             return data
 
         data = dict(data)  # don't mutate the original
+
+        # Migrate is_clock / is_reset → signal_class (only when signal_class absent)
+        if "signal_class" not in data:
+            if data.pop("is_clock", False):
+                data["signal_class"] = PortSignalClass.CLOCK.value
+            elif data.pop("is_reset", False):
+                data["signal_class"] = PortSignalClass.RESET.value
+            else:
+                data.pop("is_clock", None)
+                data.pop("is_reset", None)
+        else:
+            data.pop("is_clock", None)
+            data.pop("is_reset", None)
+
+        if "signal_type" in data:
+            return data
+
         raw_kind   = data.pop("data_type", "std_logic") or "std_logic"
         raw_range  = data.pop("vector_range", None)
 
@@ -79,6 +115,14 @@ class Port(BaseModel):
             data["signal_type"] = {"kind": kind}
 
         return data
+
+    @property
+    def is_clock(self) -> bool:
+        return self.signal_class == PortSignalClass.CLOCK
+
+    @property
+    def is_reset(self) -> bool:
+        return self.signal_class == PortSignalClass.RESET
 
     def get_pixel_position(self, grid: GridConfig | None = None) -> tuple[float, float]:
         if grid is None:

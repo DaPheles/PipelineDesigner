@@ -109,16 +109,15 @@ class _SceneConnectionMixin:
 
             src = self._connection_source_port.get_port()
 
-            # Clock/reset type constraints
-            if src.is_clock != tgt.is_clock:
-                return False
-            if src.is_reset != tgt.is_reset:
+            # Signal class must match (clock↔clock, reset↔reset, etc.)
+            if src.signal_class != tgt.signal_class:
                 return False
 
-            # Signal kind / width compatibility (data ports only)
-            if not src.is_clock and not src.is_reset:
-                if not self._signal_types_compatible(src, tgt):
-                    return False
+            # Signal kind / width compatibility (data and control ports only)
+            if src.is_clock or src.is_reset:
+                pass  # no type check for clock/reset
+            elif not self._signal_types_compatible(src, tgt):
+                return False
 
             # Duplicate check
             src_name = src.name
@@ -137,9 +136,7 @@ class _SceneConnectionMixin:
             # An unconnected interface port is typeless — allow any first connection.
             # Once it has a connection it is typed and must match.
             if self._iface_port_has_connections(src_iface.id):
-                if src_iface.is_clock != tgt.is_clock:
-                    return False
-                if src_iface.is_reset != tgt.is_reset:
+                if src_iface.signal_class != tgt.signal_class:
                     return False
 
             # Duplicate check
@@ -164,11 +161,9 @@ class _SceneConnectionMixin:
         source_comp_id = self._connection_source_component_id
         src_name = src.name
 
-        # Clock/reset type constraints (skip if interface port is typeless)
+        # Signal class must match (skip if interface port is typeless)
         if self._iface_port_has_connections(tgt_iface.id):
-            if src.is_clock != tgt_iface.is_clock:
-                return False
-            if src.is_reset != tgt_iface.is_reset:
+            if src.signal_class != tgt_iface.signal_class:
                 return False
 
         # Duplicate check
@@ -257,18 +252,18 @@ class _SceneConnectionMixin:
     # ── Connection item creation ──────────────────────────────────────────────
 
     def _wire_kind_for_connection(self, connection: Connection) -> str:
-        """Return 'clock', 'reset', or 'data' for a connection's source port type."""
+        """Return 'clock', 'reset', 'control', or 'data' for a connection's source port."""
+        from pipeline_designer.domain.models.component import PortSignalClass
+
         src = connection.source
+        sc: PortSignalClass | None = None
+
         if src.component_id is not None:
             comp_item = self._component_items.get(src.component_id)
             if comp_item:
                 port_item = comp_item._port_items.get(src.port_name)
                 if port_item:
-                    p = port_item.get_port()
-                    if p.is_clock:
-                        return "clock"
-                    if p.is_reset:
-                        return "reset"
+                    sc = port_item.get_port().signal_class
         elif src.interface_port_id is not None:
             iport = next(
                 (p for p in self._design.interface_ports
@@ -276,10 +271,10 @@ class _SceneConnectionMixin:
                 None,
             )
             if iport:
-                if iport.is_clock:
-                    return "clock"
-                if iport.is_reset:
-                    return "reset"
+                sc = iport.signal_class
+
+        if sc is not None:
+            return sc.value  # "clock", "reset", "control", or "data"
         return "data"
 
     def _get_port_edge(
@@ -373,15 +368,16 @@ class _SceneConnectionMixin:
     # ── Interface port type sync ──────────────────────────────────────────────
 
     def _sync_interface_port_types(self) -> None:
-        """Derive is_clock/is_reset on InterfacePort objects from connected ports.
+        """Derive signal_class on InterfacePort objects from connected ports.
 
         Called after design load and after every connection add/remove so that
         interface port coloring and connection-type validation stay correct.
         """
-        # Reset all flags; they'll be re-derived from connections.
+        from pipeline_designer.domain.models.component import PortSignalClass
+
+        # Reset all to DATA; they'll be re-derived from connections.
         for iport in self._design.interface_ports:
-            iport.is_clock = False
-            iport.is_reset = False
+            iport.signal_class = PortSignalClass.DATA
 
         for conn in self._design.connections:
             src, tgt = conn.source, conn.target
@@ -397,9 +393,7 @@ class _SceneConnectionMixin:
                 if iport and comp_item:
                     pi = comp_item._port_items.get(tgt.port_name)
                     if pi:
-                        p = pi.get_port()
-                        iport.is_clock = p.is_clock
-                        iport.is_reset = p.is_reset
+                        iport.signal_class = pi.get_port().signal_class
 
             # Component OUTPUT → interface OUTPUT
             elif src.component_id is not None and tgt.interface_port_id is not None:
@@ -412,9 +406,7 @@ class _SceneConnectionMixin:
                 if iport and comp_item:
                     pi = comp_item._port_items.get(src.port_name)
                     if pi:
-                        p = pi.get_port()
-                        iport.is_clock = p.is_clock
-                        iport.is_reset = p.is_reset
+                        iport.signal_class = pi.get_port().signal_class
 
         # Refresh visual appearance of all interface port items.
         for iface_item in self._interface_port_items.values():

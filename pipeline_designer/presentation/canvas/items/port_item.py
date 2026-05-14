@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pipeline_designer.domain.models import Port, PortDirection
+from pipeline_designer.domain.models import Port, PortDirection, PortSignalClass
 
 
 class PortItem(QGraphicsEllipseItem):
@@ -25,12 +25,13 @@ class PortItem(QGraphicsEllipseItem):
 
     PORT_RADIUS = 6.0
 
-    COLOR_INPUT = QColor("#70ad47")  # Green
-    COLOR_OUTPUT = QColor("#ed7d31")  # Orange
-    COLOR_CLOCK = QColor("#5b9bd5")  # Blue
-    COLOR_RESET = QColor("#c45911")  # Dark orange
-    COLOR_INOUT = QColor("#7030a0")  # Purple
-    COLOR_HOVER = QColor("#ffcc00")  # Yellow highlight
+    COLOR_INPUT   = QColor("#70ad47")  # Green
+    COLOR_OUTPUT  = QColor("#ed7d31")  # Orange
+    COLOR_CLOCK   = QColor("#5b9bd5")  # Blue
+    COLOR_RESET   = QColor("#c45911")  # Dark orange
+    COLOR_CONTROL = QColor("#9b59b6")  # Purple
+    COLOR_INOUT   = QColor("#7030a0")  # Dark purple
+    COLOR_HOVER   = QColor("#ffcc00")  # Yellow highlight
     COLOR_CONNECT_VALID = QColor("#00ff00")  # Bright green for valid connection
     COLOR_CONNECT_INVALID = QColor("#ff0000")  # Red for invalid connection
 
@@ -82,10 +83,13 @@ class PortItem(QGraphicsEllipseItem):
             return self.COLOR_CONNECT_VALID if self._is_valid_target else self.COLOR_CONNECT_INVALID
         if self._is_hovered:
             return self.COLOR_HOVER
-        if self._port.is_clock:
+        sc = self._port.signal_class
+        if sc == PortSignalClass.CLOCK:
             return self.COLOR_CLOCK
-        if self._port.is_reset:
+        if sc == PortSignalClass.RESET:
             return self.COLOR_RESET
+        if sc == PortSignalClass.CONTROL:
+            return self.COLOR_CONTROL
         if self._port.direction == PortDirection.IN:
             return self.COLOR_INPUT
         if self._port.direction == PortDirection.OUT:

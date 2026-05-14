@@ -19,6 +19,7 @@ from pipeline_designer.domain.models import (
     Connection,
     Design,
     PortDirection,
+    PortSignalClass,
     Stage,
 )
 
@@ -75,11 +76,12 @@ class InternalComponentItem(QGraphicsRectItem):
         if not self._definition:
             return
 
-        PORT_RADIUS = 5.0
-        COLOR_INPUT  = QColor("#70ad47")
-        COLOR_OUTPUT = QColor("#ed7d31")
-        COLOR_CLOCK  = QColor("#5b9bd5")
-        COLOR_RESET  = QColor("#c45911")
+        PORT_RADIUS   = 5.0
+        COLOR_INPUT   = QColor("#70ad47")
+        COLOR_OUTPUT  = QColor("#ed7d31")
+        COLOR_CLOCK   = QColor("#5b9bd5")
+        COLOR_RESET   = QColor("#c45911")
+        COLOR_CONTROL = QColor("#9b59b6")
 
         rect = self.rect()
 
@@ -94,10 +96,13 @@ class InternalComponentItem(QGraphicsRectItem):
                 x_px = 0.0
                 y_px = rect.height() / 2
 
-            if port.is_clock:
+            sc = port.signal_class
+            if sc == PortSignalClass.CLOCK:
                 color = COLOR_CLOCK
-            elif port.is_reset:
+            elif sc == PortSignalClass.RESET:
                 color = COLOR_RESET
+            elif sc == PortSignalClass.CONTROL:
+                color = COLOR_CONTROL
             elif port.direction == PortDirection.IN:
                 color = COLOR_INPUT
             else:

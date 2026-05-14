@@ -35,6 +35,7 @@ class ConnectionItem(QGraphicsPathItem):
     COLOR_NORMAL   = QColor("#a0a0a0")   # gray        — data nets
     COLOR_CLOCK    = QColor("#5b9bd5")   # blue        — clock nets
     COLOR_RESET    = QColor("#c45911")   # dark orange — reset nets
+    COLOR_CONTROL  = QColor("#9b59b6")   # purple      — control nets
     COLOR_SELECTED = QColor("#ffffff")   # white
     COLOR_HOVER    = QColor("#ffcc00")   # yellow
     LINE_WIDTH          = 2.0
@@ -56,7 +57,7 @@ class ConnectionItem(QGraphicsPathItem):
             connection:   The connection model.
             source_pos:   Scene position of the source port centre.
             target_pos:   Scene position of the target port centre.
-            wire_kind:    ``"data"``, ``"clock"`` or ``"reset"``.
+            wire_kind:    ``"data"``, ``"clock"``, ``"reset"``, or ``"control"``.
             source_edge:  Edge of the source component the port sits on.
             target_edge:  Edge of the target component the port sits on.
             parent:       Parent graphics item.
@@ -95,6 +96,9 @@ class ConnectionItem(QGraphicsPathItem):
         elif self._wire_kind == "reset":
             color = self.COLOR_RESET
             width = self.LINE_WIDTH
+        elif self._wire_kind == "control":
+            color = self.COLOR_CONTROL
+            width = self.LINE_WIDTH
         else:
             color = self.COLOR_NORMAL
             width = self.LINE_WIDTH
@@ -111,7 +115,7 @@ class ConnectionItem(QGraphicsPathItem):
         if self._wire_kind in ("clock", "reset"):
             self.setPath(self._build_orthogonal_path())
         else:
-            self.setPath(self._build_bezier_path())
+            self.setPath(self._build_bezier_path())  # data and control
 
     def _build_bezier_path(self) -> QPainterPath:
         """Smooth cubic bezier for data wires."""

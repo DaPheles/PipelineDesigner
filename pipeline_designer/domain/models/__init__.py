@@ -6,6 +6,7 @@ from .component import (
     Generic,
     Port,
     PortDirection,
+    PortSignalClass,
     VisualConfig,
 )
 from .design import ComponentConfig, Design, VisualExtent
@@ -23,6 +24,7 @@ __all__ = [
     "SignalType",
     "ComponentBehavior",
     "PortDirection",
+    "PortSignalClass",
     "Port",
     "Generic",
     "VisualConfig",

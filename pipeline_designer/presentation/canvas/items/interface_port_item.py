@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
-from pipeline_designer.domain.models import InterfaceDirection, InterfacePort
+from pipeline_designer.domain.models import InterfaceDirection, InterfacePort, PortSignalClass
 
 
 class InterfacePortItem(QGraphicsEllipseItem):
@@ -70,10 +70,13 @@ class InterfacePortItem(QGraphicsEllipseItem):
     def _update_appearance(self) -> None:
         """Update the visual appearance based on direction and selection."""
         iport = self._interface_port
-        if iport.is_clock:
-            color = QColor("#5b9bd5")   # Blue for clock
-        elif iport.is_reset:
-            color = QColor("#c45911")   # Dark orange for reset
+        sc = iport.signal_class
+        if sc == PortSignalClass.CLOCK:
+            color = QColor("#5b9bd5")   # Blue
+        elif sc == PortSignalClass.RESET:
+            color = QColor("#c45911")   # Dark orange
+        elif sc == PortSignalClass.CONTROL:
+            color = QColor("#9b59b6")   # Purple
         elif iport.direction == InterfaceDirection.INPUT:
             color = QColor("#27ae60")   # Green for input
         else:
