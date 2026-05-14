@@ -24,7 +24,7 @@
             "signal_type": {
                 "kind": "SIG_TYPE",
                 "width": "A_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 0,
@@ -39,7 +39,7 @@
             "signal_type": {
                 "kind": "SIG_TYPE",
                 "width": "B_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 0,
@@ -54,7 +54,7 @@
             "signal_type": {
                 "kind": "SIG_TYPE",
                 "width": "PROD_WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 4,
@@ -84,6 +84,11 @@
             "name": "SIG_TYPE",
             "data_type": "signal_kind",
             "default_value": "signed"
+        },
+        {
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": 0
         }
     ],
     "visual": {

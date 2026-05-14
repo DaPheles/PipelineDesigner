@@ -180,6 +180,16 @@ class DesignSimulator:
         # Topological sort of combinational nodes
         self._topo_order = self._topo_sort()
 
+        # Per-(instance, port) output FIFO for latency > 0 components.
+        # Each deque accumulates computed results; the output visible this cycle
+        # is the oldest entry once the buffer is full (depth == latency).
+        self._latency_buffers: dict[_NetKey, deque] = {}
+        for inst_id in self._topo_order:
+            defn = self._inst_def[inst_id]
+            if defn.latency > 0:
+                for port in defn.get_output_ports():
+                    self._latency_buffers[(inst_id, port.name)] = deque()
+
         # Pre-compute zero values for register Q outputs.
         # Traces each register's Q connection to find the consumer port's
         # BehaviorPortType, then quantizes 0.0 to that format.
@@ -283,6 +293,9 @@ class DesignSimulator:
             self._signals[(reg_id, "q")] = zero
         for executor in self._executors.values():
             executor.reset_state()
+        for (inst_id, _port_name), buf in self._latency_buffers.items():
+            buf.clear()
+            buf.extend([np.float64(0.0)] * self._inst_def[inst_id].latency)
 
     def set_input(self, name: str, value: SignalValue) -> None:
         """Set an interface input port value for the next ``step()`` call."""
@@ -330,16 +343,28 @@ class DesignSimulator:
             executor   = self._executors[inst_id]
             in_ports   = self._exec_input_ports[inst_id]
             out_ports  = self._exec_output_ports[inst_id]
+            latency    = self._inst_def[inst_id].latency
 
             args = [self._resolve(inst_id, p) for p in in_ports]
             result = executor(*args)
 
-            # Store outputs — single return value or tuple
+            # Unpack result into per-port dict first
+            raw: dict[str, Any] = {}
             if len(out_ports) == 1:
-                self._signals[(inst_id, out_ports[0])] = result
+                raw[out_ports[0]] = result
             elif len(out_ports) > 1:
-                for i, name in enumerate(out_ports):
-                    self._signals[(inst_id, name)] = result[i]
+                for i, pname in enumerate(out_ports):
+                    raw[pname] = result[i]
+
+            # Apply latency buffering when declared; otherwise pass through
+            for pname, val in raw.items():
+                key = (inst_id, pname)
+                if latency > 0:
+                    buf = self._latency_buffers[key]
+                    self._signals[key] = buf.popleft()
+                    buf.append(val)
+                else:
+                    self._signals[key] = val
 
         # ── Phase 2: register capture ─────────────────────────────────────────
         new_q: dict[_NetKey, SignalValue] = {}
