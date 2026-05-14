@@ -98,6 +98,7 @@ class PortTable(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._syncing = False
+        self._generic_defaults: dict = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -151,6 +152,16 @@ class PortTable(QWidget):
         for port in ports:
             self._append_row(port)
         self._syncing = False
+
+    def set_generic_defaults(self, defaults: dict) -> None:
+        """Update the generic default values used to resolve symbolic notation.
+
+        Call this whenever the primitive's generic table changes so that
+        port notation (e.g. ``U8.8``) is recomputed using the new defaults.
+        """
+        self._generic_defaults = defaults
+        for row in range(self._table.rowCount()):
+            self._update_notation(row, self._get_kind(row))
 
     def get_ports(self) -> list[Port]:
         return [p for p in (self._row_to_port(r) for r in range(self._table.rowCount())) if p]
@@ -330,7 +341,7 @@ class PortTable(QWidget):
             lbl.setText("")
             return
         st = SignalType(kind=kind_text, width=width_w.text() or "1", lsb=lsb_w.text() or "0")
-        notation = st.notation()
+        notation = st.notation(self._generic_defaults or None)
         lbl.setText(notation or "")
 
     def _on_position_spin_changed(self, row: int) -> None:

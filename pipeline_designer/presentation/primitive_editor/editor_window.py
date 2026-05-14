@@ -286,6 +286,7 @@ class PrimitiveEditorWindow(QMainWindow):
         )
 
         self._generic_table.set_generics(comp.generics)
+        self._port_table.set_generic_defaults(self._generic_defaults_from(comp.generics))
         self._port_table.set_ports(comp.ports)
 
         # Visual tab
@@ -371,7 +372,6 @@ class PrimitiveEditorWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-        # Determine file path (keep existing path when renaming)
         old_path = self._loader.get_primitive_file_path(self._current.name)
         saved_path = self._loader.save_primitive(comp, old_path)
 
@@ -475,10 +475,20 @@ class PrimitiveEditorWindow(QMainWindow):
         self._canvas.update_port_position(name, x, y)
 
     def _on_generics_changed(self) -> None:
-        """Generic table edited — refresh behavior editor generics."""
+        """Generic table edited — refresh behavior editor generics and port notation."""
         generics = self._generic_table.get_generics()
         ports    = self._port_table.get_ports()
         self._behavior_editor.refresh_ports(ports, generics)
+        self._port_table.set_generic_defaults(self._generic_defaults_from(generics))
+
+    @staticmethod
+    def _generic_defaults_from(generics) -> dict:
+        """Build a ``{name: default_value}`` dict from a list of Generic objects."""
+        return {
+            g.name: g.default_value
+            for g in generics
+            if g.default_value is not None
+        }
 
     def _on_ports_changed(self) -> None:
         """Port table edited — refresh behavior editor port list and canvas."""

@@ -1,0 +1,71 @@
+{
+    "name": "FP_Resize_S2S",
+    "category": "primitives",
+    "description": "FixedPoint convertion of signed numbers",
+    "ports": [
+        {
+            "name": "a",
+            "direction": "in",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "A_WIDTH",
+                "lsb": "A_LSB"
+            },
+            "position": [
+                0,
+                3
+            ]
+        },
+        {
+            "name": "q",
+            "direction": "out",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "Q_WIDTH",
+                "lsb": "Q_LSB"
+            },
+            "position": [
+                4,
+                3
+            ]
+        }
+    ],
+    "generics": [
+        {
+            "name": "A_WIDTH",
+            "data_type": "integer",
+            "default_value": 16
+        },
+        {
+            "name": "A_LSB",
+            "data_type": "integer",
+            "default_value": 0
+        },
+        {
+            "name": "Q_WIDTH",
+            "data_type": "integer",
+            "default_value": 16
+        },
+        {
+            "name": "Q_LSB",
+            "data_type": "integer",
+            "default_value": 0
+        },
+        {
+            "name": "CLAMP_EN",
+            "data_type": "integer",
+            "default_value": 1
+        }
+    ],
+    "visual": {
+        "width": 4,
+        "height": 6,
+        "color": "#4a90d9"
+    },
+    "latency": 0,
+    "behavior": {
+        "code": "q_max = (1 << (Q_WIDTH+Q_LSB-1)) - 1\nq_min = -(1 << (Q_WIDTH+Q_LSB-1))\nq_clamped = q_min if a <= q_min else q_max if a >= q_max else a\nreturn q_clamped if CLAMP_EN else a"
+    }
+}

@@ -413,6 +413,15 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["port_name"] = name_edit
 
+        # Signal class (editable combo)
+        sc_combo = QComboBox()
+        for member in PortSignalClass:
+            sc_combo.addItem(member.value)
+        sc_combo.setCurrentText(port.signal_class.value)
+        sc_combo.currentTextChanged.connect(self._on_port_signal_class_changed)
+        self._content_layout.addRow("Signal Class:", sc_combo)
+        self._property_widgets["port_signal_class"] = sc_combo
+
         # Signal type (read-only)
         st = port.signal_type
         g = generic_values or {}
@@ -431,15 +440,6 @@ class PropertyEditor(QWidget):
             fmt_label = QLabel(fmt_text)
             fmt_label.setStyleSheet("color: #89dceb; font-family: monospace;")
             self._content_layout.addRow("Format:", fmt_label)
-
-        # Signal class (editable combo)
-        sc_combo = QComboBox()
-        for member in PortSignalClass:
-            sc_combo.addItem(member.value)
-        sc_combo.setCurrentText(port.signal_class.value)
-        sc_combo.currentTextChanged.connect(self._on_port_signal_class_changed)
-        self._content_layout.addRow("Signal Class:", sc_combo)
-        self._property_widgets["port_signal_class"] = sc_combo
 
         # Separator
         sep = QFrame()
@@ -612,12 +612,18 @@ class PropertyEditor(QWidget):
             self._content_layout.insertRow(2, "Signal Type:", type_combo)
             self._property_widgets["interface_port_type"] = type_combo
 
+            # Format label (derived, read-only)
+            format_lbl = QLabel()
+            format_lbl.setStyleSheet("color: #89dceb; font-family: monospace;")
+            self._content_layout.insertRow(3, "Format:", format_lbl)
+            self._property_widgets["interface_port_format"] = format_lbl
+
             # Width spinbox
             width_spin = QSpinBox()
             width_spin.setRange(1, 256)
             width_spin.setValue(init_width)
             width_spin.valueChanged.connect(self._on_interface_port_fp_changed)
-            self._content_layout.insertRow(3, "Width (bits):", width_spin)
+            self._content_layout.insertRow(4, "Width (bits):", width_spin)
             self._property_widgets["interface_port_width"] = width_spin
 
             # LSB spinbox (negative = fractional bits)
@@ -626,14 +632,8 @@ class PropertyEditor(QWidget):
             lsb_spin.setValue(init_lsb)
             lsb_spin.setToolTip("LSB position: 0 = integer, negative = fractional bits")
             lsb_spin.valueChanged.connect(self._on_interface_port_fp_changed)
-            self._content_layout.insertRow(4, "LSB:", lsb_spin)
+            self._content_layout.insertRow(5, "LSB:", lsb_spin)
             self._property_widgets["interface_port_lsb"] = lsb_spin
-
-            # Format label (derived, read-only)
-            format_lbl = QLabel()
-            format_lbl.setStyleSheet("color: #89dceb; font-family: monospace;")
-            self._content_layout.insertRow(5, "Format:", format_lbl)
-            self._property_widgets["interface_port_format"] = format_lbl
 
             # Initialise signal_type on model and update label
             self._sync_interface_port_signal_type()

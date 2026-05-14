@@ -54,15 +54,15 @@ class Port(BaseModel):
 
     name:         str             = Field(..., description="Port name")
     direction:    PortDirection   = Field(..., description="Port direction")
+    signal_class: PortSignalClass = Field(
+        default=PortSignalClass.DATA,
+        description="Signal classification: clock, reset, control, or data",
+    )
     signal_type:  SignalType      = Field(
         default_factory=lambda: SignalType(kind="std_logic"),
         description="Signal type (kind, width, lsb)",
     )
     position:     tuple[int, int] | None = Field(default=None, description="Grid-unit position (x, y)")
-    signal_class: PortSignalClass = Field(
-        default=PortSignalClass.DATA,
-        description="Signal classification: clock, reset, control, or data",
-    )
 
     @model_validator(mode="before")
     @classmethod

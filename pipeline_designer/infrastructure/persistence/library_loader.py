@@ -1,6 +1,7 @@
 """Library loader for component definitions."""
 
 import json
+import re
 from pathlib import Path
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
@@ -229,41 +230,58 @@ class LibraryLoader:
         """Return the JSON file path for a primitive, or None if unknown."""
         return self._primitive_file_paths.get(name)
 
+    @staticmethod
+    def _name_to_filename(name: str) -> str:
+        """Convert a component name to a safe, lowercase filename stem.
+
+        Replaces any character that is not a-z, 0-9, or ``_`` with ``_``.
+        Example: ``"FP Resize (v2)"`` → ``"fp_resize__v2_"``.
+        """
+        return re.sub(r"[^a-z0-9_]", "_", name.lower())
+
     def save_primitive(
         self,
         component: ComponentDefinition,
-        file_path: Path | None = None,
+        old_path: Path | None = None,
     ) -> Path:
         """Persist a primitive definition to JSON and update in-memory state.
 
-        If *file_path* is not given, the existing path for this component name
-        is reused; otherwise a new file is created under library/primitives/.
+        The target file is always derived from the component name so that the
+        JSON file and the component name stay in sync.  If *old_path* is
+        provided and differs from the derived target path, the old file is
+        deleted after the new one is written (rename-on-disk).
         """
-        if file_path is None:
-            file_path = self._primitive_file_paths.get(component.name)
-        if file_path is None:
-            safe = component.name.lower().replace(" ", "_")
-            file_path = self.library_path / "primitives" / f"{safe}.json"
+        # Derive canonical target path from the component name
+        stem = self._name_to_filename(component.name)
+        target_path = self.library_path / "primitives" / f"{stem}.json"
 
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        # Fall back: if old_path was not supplied, try the registry
+        if old_path is None:
+            old_path = self._primitive_file_paths.get(component.name)
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         data = component.model_dump(mode="json", exclude_none=True)
-        file_path.write_text(json.dumps(data, indent=4))
+        target_path.write_text(json.dumps(data, indent=4))
 
-        # Update in-memory registry
-        old_name = next(
-            (n for n, p in self._primitive_file_paths.items() if p == file_path),
-            None,
-        )
-        if old_name and old_name != component.name:
-            # Component was renamed — remove old entry
-            self._components.pop(old_name, None)
-            self._primitive_file_paths.pop(old_name, None)
-            for cat_list in self._categories.values():
-                if old_name in cat_list:
-                    cat_list.remove(old_name)
+        # Delete the old file when it moved to a new location
+        if old_path is not None and old_path != target_path and old_path.exists():
+            old_path.unlink()
+
+        # Update in-memory registry — purge whichever name previously owned old_path
+        if old_path is not None:
+            old_name = next(
+                (n for n, p in self._primitive_file_paths.items() if p == old_path),
+                None,
+            )
+            if old_name and old_name != component.name:
+                self._components.pop(old_name, None)
+                self._primitive_file_paths.pop(old_name, None)
+                for cat_list in self._categories.values():
+                    if old_name in cat_list:
+                        cat_list.remove(old_name)
 
         self._components[component.name] = component
-        self._primitive_file_paths[component.name] = file_path
+        self._primitive_file_paths[component.name] = target_path
 
         cat = component.category
         if cat not in self._categories:
@@ -271,7 +289,7 @@ class LibraryLoader:
         if component.name not in self._categories[cat]:
             self._categories[cat].append(component.name)
 
-        return file_path
+        return target_path
 
     def delete_primitive(self, name: str) -> bool:
         """Remove a primitive from the library and delete its JSON file.
