@@ -6,6 +6,7 @@
         {
             "name": "a",
             "direction": "in",
+            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -14,12 +15,12 @@
             "position": [
                 0,
                 2
-            ],
-            "signal_class": "data"
+            ]
         },
         {
             "name": "b",
             "direction": "in",
+            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -28,12 +29,12 @@
             "position": [
                 0,
                 4
-            ],
-            "signal_class": "data"
+            ]
         },
         {
             "name": "sum",
             "direction": "out",
+            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH+1",
@@ -42,8 +43,7 @@
             "position": [
                 4,
                 3
-            ],
-            "signal_class": "data"
+            ]
         }
     ],
     "generics": [

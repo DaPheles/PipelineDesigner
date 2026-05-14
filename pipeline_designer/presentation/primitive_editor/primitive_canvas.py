@@ -195,6 +195,18 @@ class _PortHandle(QGraphicsEllipseItem):
         sp = event.scenePos()
         w, h = self._scene_ref.grid_size()
 
+        # Snap to whichever bounding edge the mouse is currently closest to,
+        # allowing free movement between all four edges during a single drag.
+        w_px, h_px = _px(w), _px(h)
+        nearest = min(
+            ("left",   abs(sp.x())),
+            ("right",  abs(w_px - sp.x())),
+            ("top",    abs(sp.y())),
+            ("bottom", abs(h_px - sp.y())),
+            key=lambda t: t[1],
+        )[0]
+        self._edge = nearest
+
         if self._edge == "left":
             self._gx = 0
             self._gy = max(1, min(max(h - 1, 1), round(sp.y() / CELL)))
@@ -204,7 +216,7 @@ class _PortHandle(QGraphicsEllipseItem):
         elif self._edge == "top":
             self._gx = max(1, min(max(w - 1, 1), round(sp.x() / CELL)))
             self._gy = 0
-        elif self._edge == "bottom":
+        else:  # bottom
             self._gx = max(1, min(max(w - 1, 1), round(sp.x() / CELL)))
             self._gy = h
 
