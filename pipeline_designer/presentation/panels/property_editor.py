@@ -108,11 +108,6 @@ class PropertyEditor(QWidget):
         rename_btn.clicked.connect(self.rename_requested)
         header_layout.addWidget(rename_btn)
 
-        clone_btn = QPushButton("Clone")
-        clone_btn.setFixedHeight(22)
-        clone_btn.clicked.connect(self.clone_requested)
-        header_layout.addWidget(clone_btn)
-
         layout.addWidget(design_header)
 
         header_sep = QFrame()
@@ -414,22 +409,22 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["port_name"] = name_edit
 
-        # Data type (editable with dropdown)
-        type_combo = QComboBox()
-        type_combo.setEditable(True)  # Allow custom types
-        type_combo.addItems(self._data_types)
+        # Signal type (read-only)
+        st = port.signal_type
+        notation = st.notation()
+        type_text = notation if notation else st.kind
+        type_label = QLabel(type_text)
+        type_label.setStyleSheet("color: #888;")
+        self._content_layout.addRow("Signal Type:", type_label)
 
-        # Set current value
-        current_type = port.data_type
-        index = type_combo.findText(current_type)
-        if index >= 0:
-            type_combo.setCurrentIndex(index)
-        else:
-            type_combo.setCurrentText(current_type)
-
-        type_combo.currentTextChanged.connect(self._on_port_type_changed)
-        self._content_layout.addRow("Data Type:", type_combo)
-        self._property_widgets["port_type"] = type_combo
+        # Signal class (editable combo)
+        sc_combo = QComboBox()
+        for member in PortSignalClass:
+            sc_combo.addItem(member.value)
+        sc_combo.setCurrentText(port.signal_class.value)
+        sc_combo.currentTextChanged.connect(self._on_port_signal_class_changed)
+        self._content_layout.addRow("Signal Class:", sc_combo)
+        self._property_widgets["port_signal_class"] = sc_combo
 
         # Separator
         sep = QFrame()
@@ -457,18 +452,6 @@ class PropertyEditor(QWidget):
             pos_label.setStyleSheet("color: #888;")
             self._content_layout.addRow("Position:", pos_label)
 
-        # Signal class (read-only)
-        sc = port.signal_class
-        sc_colors = {
-            PortSignalClass.CLOCK:   "#5b9bd5",
-            PortSignalClass.RESET:   "#c45911",
-            PortSignalClass.CONTROL: "#9b59b6",
-            PortSignalClass.DATA:    "#888888",
-        }
-        sc_label = QLabel(sc.value)
-        sc_label.setStyleSheet(f"color: {sc_colors.get(sc, '#888888')}; font-weight: bold;")
-        self._content_layout.addRow("Signal class:", sc_label)
-
     def _on_port_name_changed(self, name: str) -> None:
         """Handle port name change."""
         if self._current_port and self._current_port_component_id:
@@ -480,18 +463,23 @@ class PropertyEditor(QWidget):
                     self._current_port_component_id, old_name, "name", new_name
                 )
 
-    def _on_port_type_changed(self, data_type: str) -> None:
-        """Handle port data type change."""
-        if self._current_port and self._current_port_component_id:
-            new_type = data_type.strip()
-            if new_type and new_type != self._current_port.data_type:
-                self._current_port.data_type = new_type
-                self.port_changed.emit(
-                    self._current_port_component_id,
-                    self._current_port.name,
-                    "data_type",
-                    new_type,
-                )
+    def _on_port_signal_class_changed(self, value: str) -> None:
+        """Handle signal-class combo change."""
+        if not self._current_port or not self._current_port_component_id:
+            return
+        try:
+            new_sc = PortSignalClass(value)
+        except ValueError:
+            return
+        if new_sc == self._current_port.signal_class:
+            return
+        self._current_port.signal_class = new_sc
+        self.port_changed.emit(
+            self._current_port_component_id,
+            self._current_port.name,
+            "signal_class",
+            new_sc,
+        )
 
     def set_interface_port(self, interface_port: InterfacePort) -> None:
         """Set the interface port to edit.
@@ -520,22 +508,28 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["interface_port_name"] = name_edit
 
-        # Data type (editable with dropdown)
+        # Signal type (editable with dropdown)
         type_combo = QComboBox()
-        type_combo.setEditable(True)  # Allow custom types
+        type_combo.setEditable(True)
         type_combo.addItems(self._data_types)
-
-        # Set current value
         current_type = interface_port.data_type
         index = type_combo.findText(current_type)
         if index >= 0:
             type_combo.setCurrentIndex(index)
         else:
             type_combo.setCurrentText(current_type)
-
         type_combo.currentTextChanged.connect(self._on_interface_port_type_changed)
-        self._content_layout.addRow("Data Type:", type_combo)
+        self._content_layout.addRow("Signal Type:", type_combo)
         self._property_widgets["interface_port_type"] = type_combo
+
+        # Signal class (editable combo)
+        isc_combo = QComboBox()
+        for member in PortSignalClass:
+            isc_combo.addItem(member.value)
+        isc_combo.setCurrentText(interface_port.signal_class.value)
+        isc_combo.currentTextChanged.connect(self._on_interface_port_signal_class_changed)
+        self._content_layout.addRow("Signal Class:", isc_combo)
+        self._property_widgets["interface_port_signal_class"] = isc_combo
 
         # Separator
         sep = QFrame()
@@ -582,6 +576,20 @@ class PropertyEditor(QWidget):
                 self.interface_port_changed.emit(
                     self._current_interface_port.id, "data_type", new_type
                 )
+
+    def _on_interface_port_signal_class_changed(self, value: str) -> None:
+        if not self._current_interface_port:
+            return
+        try:
+            new_sc = PortSignalClass(value)
+        except ValueError:
+            return
+        if new_sc == self._current_interface_port.signal_class:
+            return
+        self._current_interface_port.signal_class = new_sc
+        self.interface_port_changed.emit(
+            self._current_interface_port.id, "signal_class", new_sc
+        )
 
     def update_position(self, x: float, y: float) -> None:
         """Update the displayed position (called when component moves)."""

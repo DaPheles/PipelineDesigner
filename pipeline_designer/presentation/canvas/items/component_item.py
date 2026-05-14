@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 from pipeline_designer.domain.models import ComponentDefinition, ComponentInstance, Design, PortDirection
+from pipeline_designer.domain.models.component import PortSignalClass
 
 from .composite_view_item import CompositeViewItem
 from .port_item import PortItem
@@ -216,6 +217,15 @@ class ComponentItem(QGraphicsRectItem):
             composite_y_offset = self._compute_composite_y_offset()
 
         for port in self._definition.ports:
+            # Always copy the port so each instance holds an independent object.
+            # Without this, mutating one instance's port signal_class would
+            # silently modify every other instance of the same component type.
+            sc_override = self._instance.port_signal_classes.get(port.name)
+            try:
+                update = {"signal_class": PortSignalClass(sc_override)} if sc_override else {}
+                port = port.model_copy(update=update)
+            except ValueError:
+                port = port.model_copy()
             port_item = PortItem(port, self)
 
             if self._is_composite:

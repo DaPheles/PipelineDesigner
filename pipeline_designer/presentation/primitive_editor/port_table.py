@@ -74,16 +74,16 @@ class PortTable(QWidget):
 
     _COL_NAME         = 0
     _COL_DIR          = 1
-    _COL_KIND         = 2
-    _COL_WIDTH        = 3
-    _COL_LSB          = 4
-    _COL_NOTATION     = 5
-    _COL_X            = 6
-    _COL_Y            = 7
-    _COL_SIGNAL_CLASS = 8
+    _COL_SIGNAL_CLASS = 2
+    _COL_KIND         = 3
+    _COL_WIDTH        = 4
+    _COL_LSB          = 5
+    _COL_NOTATION     = 6
+    _COL_X            = 7
+    _COL_Y            = 8
     _HEADERS = [
-        "Name", "Direction", "Kind", "Width", "LSB",
-        "Notation", "X", "Y", "Class",
+        "Name", "Direction", "Class", "Kind", "Width", "LSB",
+        "Notation", "X", "Y",
     ]
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -178,6 +178,17 @@ class PortTable(QWidget):
         dir_combo.currentIndexChanged.connect(self._emit_changed)
         self._table.setCellWidget(row, self._COL_DIR, dir_combo)
 
+        # Signal class combo (right after direction)
+        sc_combo = QComboBox()
+        for opt in _SIGNAL_CLASS_OPTIONS:
+            sc_combo.addItem(opt)
+        sc_val = port.signal_class.value if port else PortSignalClass.DATA.value
+        idx = sc_combo.findText(sc_val)
+        if idx >= 0:
+            sc_combo.setCurrentIndex(idx)
+        sc_combo.currentIndexChanged.connect(self._emit_changed)
+        self._table.setCellWidget(row, self._COL_SIGNAL_CLASS, sc_combo)
+
         # Kind — editable combo so generic names can be typed
         kind_combo = QComboBox()
         kind_combo.setEditable(True)
@@ -224,17 +235,6 @@ class PortTable(QWidget):
             spin.setValue(val)
             spin.valueChanged.connect(lambda _, r=row: self._on_position_spin_changed(r))
             self._table.setCellWidget(row, col, spin)
-
-        # Signal class combo
-        sc_combo = QComboBox()
-        for opt in _SIGNAL_CLASS_OPTIONS:
-            sc_combo.addItem(opt)
-        sc_val = port.signal_class.value if port else PortSignalClass.DATA.value
-        idx = sc_combo.findText(sc_val)
-        if idx >= 0:
-            sc_combo.setCurrentIndex(idx)
-        sc_combo.currentIndexChanged.connect(self._emit_changed)
-        self._table.setCellWidget(row, self._COL_SIGNAL_CLASS, sc_combo)
 
         # Initialise enabled/notation state
         self._update_range_state(row, kind_val)

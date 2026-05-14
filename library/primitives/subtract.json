@@ -1,5 +1,5 @@
 {
-    "name": "Adder",
+    "name": "Subtract",
     "category": "primitives",
     "description": "Generic adder with carry out. SIG_TYPE controls signed/unsigned interpretation.",
     "ports": [
@@ -32,7 +32,7 @@
             "signal_class": "data"
         },
         {
-            "name": "sum",
+            "name": "diff",
             "direction": "out",
             "signal_type": {
                 "kind": "SIG_TYPE",
@@ -66,10 +66,10 @@
     "visual": {
         "width": 4,
         "height": 6,
-        "color": "#ed7d31"
+        "color": "#2ec27e"
     },
     "latency": 0,
     "behavior": {
-        "code": "return a + b"
+        "code": "return a - b"
     }
 }

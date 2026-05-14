@@ -134,6 +134,13 @@ class ComponentInstance(BaseModel):
         default=False,
         description="True while instance is at a temporary/provisional position",
     )
+    # Per-instance port signal_class overrides: {port_name: signal_class_value}
+    # Used to persist signal-class changes made in the design editor without
+    # modifying the shared ComponentDefinition in the library.
+    port_signal_classes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-port signal_class overrides (port_name -> PortSignalClass value)",
+    )
 
     def get_display_name(self) -> str:
         """Get the display name for this instance."""

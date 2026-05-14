@@ -133,11 +133,9 @@ class _SceneConnectionMixin:
             src_iface = self._connection_source_interface_port.get_interface_port()
             tgt_name = tgt.name
 
-            # An unconnected interface port is typeless — allow any first connection.
-            # Once it has a connection it is typed and must match.
-            if self._iface_port_has_connections(src_iface.id):
-                if src_iface.signal_class != tgt.signal_class:
-                    return False
+            # Signal class must always match.
+            if src_iface.signal_class != tgt.signal_class:
+                return False
 
             # Duplicate check
             for conn in self._design.connections:
@@ -161,10 +159,9 @@ class _SceneConnectionMixin:
         source_comp_id = self._connection_source_component_id
         src_name = src.name
 
-        # Signal class must match (skip if interface port is typeless)
-        if self._iface_port_has_connections(tgt_iface.id):
-            if src.signal_class != tgt_iface.signal_class:
-                return False
+        # Signal class must always match.
+        if src.signal_class != tgt_iface.signal_class:
+            return False
 
         # Duplicate check
         for conn in self._design.connections:
@@ -368,47 +365,12 @@ class _SceneConnectionMixin:
     # ── Interface port type sync ──────────────────────────────────────────────
 
     def _sync_interface_port_types(self) -> None:
-        """Derive signal_class on InterfacePort objects from connected ports.
+        """Refresh the visual appearance of all interface port items.
 
-        Called after design load and after every connection add/remove so that
-        interface port coloring and connection-type validation stay correct.
+        Signal class on interface ports is fully user-controlled and is never
+        auto-derived from connections.  This method exists only to keep port
+        colours up-to-date after connection add/remove events.
         """
-        from pipeline_designer.domain.models.component import PortSignalClass
-
-        # Reset all to DATA; they'll be re-derived from connections.
-        for iport in self._design.interface_ports:
-            iport.signal_class = PortSignalClass.DATA
-
-        for conn in self._design.connections:
-            src, tgt = conn.source, conn.target
-
-            # Interface INPUT → component INPUT
-            if src.interface_port_id is not None and tgt.component_id is not None:
-                iport = next(
-                    (p for p in self._design.interface_ports
-                     if p.id == src.interface_port_id),
-                    None,
-                )
-                comp_item = self._component_items.get(tgt.component_id)
-                if iport and comp_item:
-                    pi = comp_item._port_items.get(tgt.port_name)
-                    if pi:
-                        iport.signal_class = pi.get_port().signal_class
-
-            # Component OUTPUT → interface OUTPUT
-            elif src.component_id is not None and tgt.interface_port_id is not None:
-                iport = next(
-                    (p for p in self._design.interface_ports
-                     if p.id == tgt.interface_port_id),
-                    None,
-                )
-                comp_item = self._component_items.get(src.component_id)
-                if iport and comp_item:
-                    pi = comp_item._port_items.get(src.port_name)
-                    if pi:
-                        iport.signal_class = pi.get_port().signal_class
-
-        # Refresh visual appearance of all interface port items.
         for iface_item in self._interface_port_items.values():
             iface_item._update_appearance()
 

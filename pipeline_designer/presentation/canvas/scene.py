@@ -148,6 +148,20 @@ class DesignScene(
         """Get the current design."""
         return self._design
 
+    def get_invalid_connection_ids(self) -> set:
+        """Return the IDs of all currently-invalid (signal-class mismatch) connections."""
+        from uuid import UUID
+        return {
+            item.get_connection().id
+            for item in self._connection_items.values()
+            if item._is_invalid
+        }
+
+    def revalidate_connections(self) -> None:
+        """Re-check all connections for signal-class mismatches and emit warnings."""
+        self._sync_interface_port_types()
+        self._emit_validation_warnings(self._validate_all_connections())
+
     def set_design(self, design: Design) -> None:
         """Set a new design, clearing existing items."""
         # Reset alignment state FIRST while Qt objects are still alive.

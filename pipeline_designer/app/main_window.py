@@ -284,9 +284,19 @@ class MainWindow(QMainWindow):
             self._save_to_file(Path(file_path))
 
     def _save_to_file(self, path: Path) -> None:
-        """Save the design to a file."""
+        """Save the design to a file, silently dropping invalid connections."""
         try:
             design = self._scene.get_design()
+            invalid_ids = self._scene.get_invalid_connection_ids()
+            if invalid_ids:
+                design = design.model_copy(
+                    update={"connections": [
+                        c for c in design.connections if c.id not in invalid_ids
+                    ]}
+                )
+                self._status_bar.showMessage(
+                    f"Saved (dropped {len(invalid_ids)} invalid connection(s))", 5000
+                )
             json_str = design.model_dump_json(indent=2)
             path.write_text(json_str)
 
@@ -417,6 +427,14 @@ class MainWindow(QMainWindow):
                 del comp_item._port_items[port_name]
                 comp_item._port_items[new_value] = port_item
 
+            # If signal_class changed, write it onto the authoritative port object,
+            # persist it in the instance override dict, and re-validate connections.
+            if property_name == "signal_class":
+                port_item.get_port().signal_class = new_value
+                comp_item.get_instance().port_signal_classes[port_name] = new_value.value
+                port_item.refresh_appearance()
+                self._scene.revalidate_connections()
+
     def _on_interface_port_changed(
         self, port_id, property_name: str, new_value
     ) -> None:
@@ -432,11 +450,16 @@ class MainWindow(QMainWindow):
 
         self._sim_panel.mark_dirty()
 
-        # Get the interface port item and update its display
         port_item = self._scene.get_interface_port_item(port_id)
         if port_item:
-            # Force a repaint to update the label
-            port_item.update()
+            if property_name == "signal_class":
+                # Write value onto the authoritative model object, refresh colour,
+                # and re-validate all connections for mismatches.
+                port_item.get_interface_port().signal_class = new_value
+                port_item._update_appearance()
+                self._scene.revalidate_connections()
+            else:
+                port_item.update()
 
     def _on_primitive_editor(self) -> None:
         """Open (or raise) the primitive editor window."""

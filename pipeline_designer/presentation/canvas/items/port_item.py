@@ -116,6 +116,10 @@ class PortItem(QGraphicsEllipseItem):
         tooltip = f"{self._port.name}\nType: {type_str}\nDirection: {self._port.direction.value}"
         self.setToolTip(tooltip)
 
+    def refresh_appearance(self) -> None:
+        """Refresh color after model properties (e.g. signal_class) change."""
+        self._update_appearance()
+
     def is_output(self) -> bool:
         """Check if this is an output port."""
         return self._port.direction == PortDirection.OUT
