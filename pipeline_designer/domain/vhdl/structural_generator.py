@@ -255,28 +255,28 @@ class StructuralVhdlGenerator:
         # Design-level generics (from component_config.generics)
         cfg_generics = design.component_config.generics
         if cfg_generics:
-            lines.append("    generic (")
+            lines.append("  generic (")
             gen_parts = []
             for g in cfg_generics:
                 vtype   = _generic_vhdl_type(g.data_type)
                 dval    = _generic_value_str(g.default_value, g.data_type)
                 default = f" := {dval}" if dval else ""
-                gen_parts.append(f"        {g.name} : {vtype}{default}")
+                gen_parts.append(f"    {g.name} : {vtype}{default}")
             lines.append(";\n".join(gen_parts))
-            lines.append("    );")
+            lines.append("  );")
 
         # Ports
         ifaces = design.interface_ports
         if ifaces:
-            lines.append("    port (")
+            lines.append("  port (")
             port_parts = []
             for ip in ifaces:
                 direction = "in   " if ip.direction == InterfaceDirection.INPUT else "out  "
                 vtype     = ip.effective_signal_type().to_vhdl_type()
                 pname     = _vhdl_ident(ip.name)
-                port_parts.append(f"        {pname:<24}: {direction} {vtype}")
+                port_parts.append(f"    {pname:<24}: {direction} {vtype}")
             lines.append(";\n".join(port_parts))
-            lines.append("    );")
+            lines.append("  );")
 
         lines.append(f"end entity {ename};")
         return "\n".join(lines)
@@ -325,30 +325,29 @@ class StructuralVhdlGenerator:
                 continue
 
             cname = _vhdl_ident(defn.name)
-            b = [f"    component {cname} is"]
+            b = [f"  component {cname} is"]
 
             if defn.generics:
-                b.append("        generic (")
+                b.append("    generic (")
                 gen_parts = []
                 for g in defn.generics:
                     vtype   = _generic_vhdl_type(g.data_type)
                     dval    = _generic_value_str(g.default_value, g.data_type)
                     default = f" := {dval}" if dval else ""
-                    gen_parts.append(f"            {g.name} : {vtype}{default}")
+                    gen_parts.append(f"      {g.name} : {vtype}{default}")
                 b.append(";\n".join(gen_parts))
-                b.append("        );")
+                b.append("    );")
 
-            b.append("        port (")
-            default_gens = {g.name: g.default_value for g in defn.generics if g.default_value is not None}
+            b.append("    port (")
             port_parts = []
             for port in defn.ports:
-                vtype = port.signal_type.to_vhdl_type(default_gens)
+                vtype = port.signal_type.to_vhdl_type()
                 port_parts.append(
-                    f"            {port.name:<20}: {_dir_str(port.direction)} {vtype}"
+                    f"      {port.name:<20}: {_dir_str(port.direction)} {vtype}"
                 )
             b.append(";\n".join(port_parts))
-            b.append("        );")
-            b.append(f"    end component {cname};")
+            b.append("    );")
+            b.append(f"  end component {cname};")
             blocks.append("\n".join(b))
 
         return "\n\n".join(blocks)
@@ -359,7 +358,7 @@ class StructuralVhdlGenerator:
         if not self._signals:
             return ""
         return "\n".join(
-            f"    signal {name:<32} : {vtype};"
+            f"  signal {name:<32} : {vtype};"
             for name, vtype in self._signals
         )
 
@@ -371,30 +370,30 @@ class StructuralVhdlGenerator:
         for inst in self._design.components:
             defn = self._library.get(inst.definition_ref)
             if defn is None:
-                blocks.append(f"    -- WARNING: no definition for '{inst.definition_ref}'")
+                blocks.append(f"  -- WARNING: no definition for '{inst.definition_ref}'")
                 continue
 
             inst_name = _vhdl_ident(inst.get_display_name())
             comp_name = _vhdl_ident(defn.name)
             generics  = _resolve_generics(inst, defn)
 
-            b = [f"    {inst_name} : {comp_name}"]
+            b = [f"  {inst_name} : {comp_name}"]
 
             # Generic map
             if defn.generics:
-                b.append("        generic map (")
+                b.append("    generic map (")
                 gm_parts = []
                 for g in defn.generics:
                     val = generics.get(g.name, g.default_value)
                     if val is not None:
                         gm_parts.append(
-                            f"            {g.name} => {_generic_value_str(val, g.data_type)}"
+                            f"      {g.name} => {_generic_value_str(val, g.data_type)}"
                         )
                 b.append(",\n".join(gm_parts))
-                b.append("        )")
+                b.append("    )")
 
             # Port map
-            b.append("        port map (")
+            b.append("    port map (")
             pm_parts = []
             for port in defn.ports:
                 sig = self._port_map.get((inst.id, port.name))
@@ -406,9 +405,9 @@ class StructuralVhdlGenerator:
                         self._warnings.append(
                             f"Input '{port.name}' on '{inst.get_display_name()}' is unconnected"
                         )
-                pm_parts.append(f"            {port.name:<20} => {sig}")
+                pm_parts.append(f"      {port.name:<20} => {sig}")
             b.append(",\n".join(pm_parts))
-            b.append("        );")
+            b.append("    );")
             blocks.append("\n".join(b))
 
         return "\n\n".join(blocks)
