@@ -162,6 +162,34 @@ class DesignScene(
         self._sync_interface_port_types()
         self._emit_validation_warnings(self._validate_all_connections())
 
+    def refresh_view(self) -> None:
+        """Repaint every visual element in the scene.
+
+        Touches all item layers in dependency order:
+        stage items → component items and their ports → interface port items
+        → connection positions and validity.
+        """
+        for stage_item in self._stage_items.values():
+            stage_item._update_appearance()
+
+        for comp_item in self._component_items.values():
+            comp_item._update_appearance()
+            for port_item in comp_item._port_items.values():
+                port_item.refresh_appearance()
+
+        for iport_item in self._interface_port_items.values():
+            iport_item._update_appearance()
+
+        self.update_connection_positions()
+
+        self._sync_interface_port_types()
+        self._rebuild_all_stages()
+        self._update_all_component_alignments()
+        self._update_component_bounds()
+        self._emit_validation_warnings(self._validate_all_connections())
+
+        self.update()
+
     def set_design(self, design: Design) -> None:
         """Set a new design, clearing existing items."""
         # Reset alignment state FIRST while Qt objects are still alive.

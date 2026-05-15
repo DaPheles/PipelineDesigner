@@ -202,6 +202,13 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("&View")
 
+        refresh_action = QAction("&Refresh", self)
+        refresh_action.setShortcut(QKeySequence("F5"))
+        refresh_action.triggered.connect(self._scene.refresh_view)
+        view_menu.addAction(refresh_action)
+
+        view_menu.addSeparator()
+
         fit_action = QAction("&Fit to Content", self)
         fit_action.setShortcut(QKeySequence("Ctrl+0"))
         fit_action.triggered.connect(self._view.fit_to_content)
