@@ -533,7 +533,13 @@ class _SceneConnectionMixin:
             if iport is None:
                 return None
             st = iport.effective_signal_type()
-            int_generics: dict[str, int] = {}
+            int_generics: dict[str, int] = {
+                g.name: int(g.default_value)
+                for g in self._design.component_config.generics
+                if g.default_value is not None
+                and isinstance(g.default_value, (int, float))
+                and not isinstance(g.default_value, bool)
+            }
         elif ref.component_id is not None:
             comp_item = self._component_items.get(ref.component_id)
             if comp_item is None:
