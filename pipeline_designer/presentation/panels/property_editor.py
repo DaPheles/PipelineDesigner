@@ -221,6 +221,7 @@ class PropertyEditor(QWidget):
 
         iport_table = InterfacePortDisplayTable()
         iport_table.set_interface_ports(self._current_design.interface_ports)
+        iport_table.set_generics(self._design_generics_dict())
         iport_table.port_changed.connect(
             lambda pid, field, val: self.interface_port_changed.emit(pid, field, val)
         )
@@ -228,10 +229,23 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow(iport_table)
         self._property_widgets["design_ports"] = iport_table
 
+    def _design_generics_dict(self) -> dict:
+        if self._current_design is None:
+            return {}
+        return {
+            g.name: g.default_value
+            for g in self._current_design.component_config.generics
+            if g.default_value is not None
+        }
+
     def _on_design_generics_changed(self) -> None:
         tbl = self._property_widgets.get("design_generics")
         if isinstance(tbl, GenericTable) and self._current_design is not None:
             self._current_design.component_config.generics = tbl.get_generics()
+        # Push updated generics to the port table so notation resolves immediately
+        port_tbl = self._property_widgets.get("design_ports")
+        if isinstance(port_tbl, InterfacePortDisplayTable):
+            port_tbl.set_generics(self._design_generics_dict())
 
     def _on_interface_ports_reordered(self, new_order: list) -> None:
         if self._current_design is None:

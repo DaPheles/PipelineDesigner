@@ -282,7 +282,8 @@ class InterfacePortDisplayTable(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._iports: list[InterfacePort] = []
+        self._iports:    list[InterfacePort] = []
+        self._generics:  dict[str, Any]      = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -328,6 +329,18 @@ class InterfacePortDisplayTable(QWidget):
         """Populate from *iports* (design.interface_ports)."""
         self._iports = list(iports)
         self._rebuild_table()
+
+    def set_generics(self, generics: dict[str, Any]) -> None:
+        """Update the design-level generics used to resolve symbolic Width/LSB.
+
+        Call this after ``set_interface_ports`` and whenever the design's
+        entity generics change so that notation values are recomputed.
+        """
+        self._generics = generics
+        for row in range(self._table.rowCount()):
+            if row < len(self._iports):
+                st = self._iports[row].effective_signal_type()
+                self._update_notation_cell(row, st)
 
     # ── Table construction ────────────────────────────────────────────────────
 
@@ -402,7 +415,8 @@ class InterfacePortDisplayTable(QWidget):
         self._table.setItem(row, self._COL_LSB, lsb_item)
 
         # ── Notation — read-only, computed ────────────────────────────────
-        notation = st.notation() or (st.to_vhdl_type() if st.has_range() else "")
+        g = self._generics or None
+        notation = st.notation(g) or (st.to_vhdl_type(g) if st.has_range(g) else "")
         notation_item = QTableWidgetItem(notation)
         notation_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         notation_item.setForeground(QColor(137, 220, 235))
@@ -412,7 +426,8 @@ class InterfacePortDisplayTable(QWidget):
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         data = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(data, tuple):
+        # PySide6 round-trips Python tuples as lists through QVariant
+        if not isinstance(data, (tuple, list)) or len(data) != 2:
             return
         field, port_id = data
         iport = next((p for p in self._iports if p.id == port_id), None)
@@ -478,7 +493,8 @@ class InterfacePortDisplayTable(QWidget):
         self._update_notation_cell(row, new_st)
 
     def _update_notation_cell(self, row: int, st: SignalType) -> None:
-        notation = st.notation() or (st.to_vhdl_type() if st.has_range() else "")
+        g = self._generics or None
+        notation = st.notation(g) or (st.to_vhdl_type(g) if st.has_range(g) else "")
         item = self._table.item(row, self._COL_NOTATION)
         if item is not None:
             self._table.blockSignals(True)
