@@ -336,7 +336,7 @@ class _SceneAlignmentMixin:
         self._last_drag_was_aligned = is_aligned
         item.set_invalid(not is_aligned)
 
-        rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+        rect = item.sceneBoundingRect().adjusted(-5, -5, 5, 5)
         overlay = TempPositionOverlayItem(rect, label=aligned_label, invalid=not is_aligned)
         self.addItem(overlay)
         self._composite_drag_overlays.append(overlay)
@@ -495,7 +495,7 @@ class _SceneAlignmentMixin:
         if old:
             self._remove_overlays_safe([old])
 
-        rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+        rect = item.sceneBoundingRect().adjusted(-5, -5, 5, 5)
         if self._last_drag_was_aligned:
             overlay = TempPositionOverlayItem(rect, "")
         else:

@@ -32,7 +32,6 @@ class ComponentItem(QGraphicsRectItem):
     """
 
     CORNER_RADIUS = 2.0
-    SELECTION_PADDING = 4.0
     HEADER_HEIGHT = 20.0  # used for non-composite components
 
     def __init__(
@@ -618,13 +617,7 @@ class ComponentItem(QGraphicsRectItem):
 
     def boundingRect(self) -> QRectF:
         """Return the bounding rectangle including selection padding."""
-        rect = self.rect()
-        return rect.adjusted(
-            -self.SELECTION_PADDING,
-            -self.SELECTION_PADDING,
-            self.SELECTION_PADDING,
-            self.SELECTION_PADDING,
-        )
+        return self.rect()
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         """Handle mouse press - record start position for undo."""
