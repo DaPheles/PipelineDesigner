@@ -30,6 +30,7 @@ from typing import Any, Callable
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -60,6 +61,8 @@ _BIT_TYPES = frozenset({
     SignalKind.STD_ULOGIC.value,
     "boolean",
 })
+
+_OOB_BRUSH = QBrush(QColor(160, 40, 40))  # dark red for out-of-range cells
 
 
 class SimMode(enum.Enum):
@@ -193,6 +196,7 @@ class DesignSimulationPanel(QWidget):
         self._in_table.horizontalHeader().setDefaultSectionSize(WaveformWidget.CYCLE_W)
         self._in_table.verticalHeader().setDefaultSectionSize(22)
         self._set_table_col_headers()
+        self._in_table.itemChanged.connect(self._on_cell_changed)
         in_layout.addWidget(self._in_table)
         splitter.addWidget(in_frame)
 
@@ -229,6 +233,7 @@ class DesignSimulationPanel(QWidget):
                     for c in range(self._in_table.columnCount())
                 ]
 
+        self._in_table.blockSignals(True)
         self._in_table.setRowCount(0)
         self._in_table.setColumnCount(self._n_cycles)
         self._set_table_col_headers()
@@ -245,6 +250,8 @@ class DesignSimulationPanel(QWidget):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
+        self._in_table.blockSignals(False)
+        self._validate_all_cells()
 
     def _set_table_col_headers(self) -> None:
         self._in_table.setHorizontalHeaderLabels(
@@ -254,6 +261,7 @@ class DesignSimulationPanel(QWidget):
     def _on_cycles_changed(self, n: int) -> None:
         self._n_cycles = n
         old = self._get_input_data()
+        self._in_table.blockSignals(True)
         self._in_table.setColumnCount(n)
         self._set_table_col_headers()
         for row, values in enumerate(old):
@@ -263,6 +271,8 @@ class DesignSimulationPanel(QWidget):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._in_table.setItem(row, c, item)
+        self._in_table.blockSignals(False)
+        self._validate_all_cells()
 
     def _on_mode_toggled(self, checked: bool, mode: SimMode) -> None:
         if checked:
@@ -277,6 +287,78 @@ class DesignSimulationPanel(QWidget):
             ]
             for row in range(self._in_table.rowCount())
         ]
+
+    def _get_design_generics(self) -> dict[str, Any]:
+        """Return default generic values from the current design's component_config."""
+        design = self._design_getter()
+        cc = design.component_config
+        if cc is None:
+            return {}
+        return {g.name: g.default_value for g in cc.generics if g.default_value is not None}
+
+    def _on_cell_changed(self, item: QTableWidgetItem) -> None:
+        row = self._in_table.row(item)
+        col = self._in_table.column(item)
+        self._validate_cell(row, col)
+
+    def _validate_cell(self, row: int, col: int) -> None:
+        if row < 0 or row >= len(self._input_ports):
+            return
+        item = self._in_table.item(row, col)
+        if item is None:
+            return
+        port = self._input_ports[row]
+        generics = self._get_design_generics()
+        oob, tooltip = self._cell_out_of_range(item.text().strip(), port, generics)
+        self._in_table.blockSignals(True)
+        try:
+            item.setBackground(_OOB_BRUSH if oob else QBrush())
+            item.setToolTip(tooltip)
+        finally:
+            self._in_table.blockSignals(False)
+
+    def _validate_all_cells(self) -> None:
+        generics = self._get_design_generics()
+        self._in_table.blockSignals(True)
+        try:
+            for row, port in enumerate(self._input_ports):
+                for col in range(self._in_table.columnCount()):
+                    item = self._in_table.item(row, col)
+                    if item is None:
+                        continue
+                    oob, tooltip = self._cell_out_of_range(item.text().strip(), port, generics)
+                    item.setBackground(_OOB_BRUSH if oob else QBrush())
+                    item.setToolTip(tooltip)
+        finally:
+            self._in_table.blockSignals(False)
+
+    @staticmethod
+    def _cell_out_of_range(text: str, port: InterfacePort, generics: dict[str, Any]) -> tuple[bool, str]:
+        """Return (is_out_of_range, tooltip_hint) for a cell value."""
+        if not text:
+            return False, ""
+        try:
+            raw = float(text)
+        except ValueError:
+            return True, "Not a valid number"
+
+        dt = port.data_type.lower()
+        if dt in _BIT_TYPES:
+            if raw not in (0.0, 1.0):
+                return True, "Must be 0 or 1"
+            return False, ""
+
+        try:
+            st = port.effective_signal_type()
+            k = st.resolved_kind(generics)
+            if k not in _FIXED_POINT_KINDS:
+                return False, ""
+            fmt = st.to_fpformat(generics)
+            if raw < fmt.real_min or raw > fmt.real_max:
+                return True, f"Out of range [{fmt.real_min:.6g}, {fmt.real_max:.6g}]"
+            return False, ""
+        except Exception:
+            return False, ""
 
     # ------------------------------------------------------------------
     # Simulation
