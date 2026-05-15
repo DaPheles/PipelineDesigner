@@ -721,13 +721,22 @@ class PropertyEditor(QWidget):
         ):
             lbl.setText("")
             return
-        st       = SignalType(
+        st = SignalType(
             kind=kind_w.currentText(),
             width=width_w.text() or "1",
             lsb=lsb_w.text() or "0",
         )
-        notation = st.notation()
-        vhdl     = st.to_vhdl_type()
+        # Resolve symbolic width/lsb against outer design's concrete defaults
+        # so that entries like "WIDTH" or "-FRAC_BITS" produce a concrete notation.
+        from pipeline_designer.domain.models.behavior import _eval_index, _substitute_generics
+        g: dict = {}
+        if self._current_design is not None:
+            for gen in self._current_design.component_config.generics:
+                if gen.default_value is not None and isinstance(gen.default_value, (int, float)) \
+                        and not isinstance(gen.default_value, bool):
+                    g[gen.name] = int(gen.default_value)
+        notation = st.notation(g) if g else st.notation()
+        vhdl     = st.to_vhdl_type(g) if g else st.to_vhdl_type()
         lbl.setText(f"{notation}  ·  {vhdl}" if notation else vhdl)
 
     def _on_interface_port_signal_class_changed(self, value: str) -> None:

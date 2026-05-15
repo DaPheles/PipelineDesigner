@@ -411,6 +411,26 @@ class MainWindow(QMainWindow):
                                 generic_values[gen.name] = gen.default_value
                     # Instance overrides take precedence
                     generic_values.update(instance.generic_values)
+                    # Resolve string-valued generics (e.g. "LSB", "WIDTH+2") using
+                    # the outer design's concrete defaults so notation() can evaluate
+                    # to a concrete S/U format string.
+                    from pipeline_designer.domain.models.behavior import (
+                        _eval_index, _substitute_generics,
+                    )
+                    outer_concrete = {
+                        g.name: g.default_value
+                        for g in self._scene.get_design().component_config.generics
+                        if g.default_value is not None
+                        and isinstance(g.default_value, (int, float))
+                        and not isinstance(g.default_value, bool)
+                    }
+                    for gname, gval in list(generic_values.items()):
+                        if isinstance(gval, str):
+                            try:
+                                substituted = _substitute_generics(gval, outer_concrete)
+                                generic_values[gname] = _eval_index(substituted, outer_concrete)
+                            except (ValueError, KeyError):
+                                pass
             self._property_editor.set_port(port, component_id, component_name, generic_values)
         elif isinstance(item, ComponentItem):
             instance = item.get_instance()
