@@ -469,6 +469,53 @@ class _SceneConnectionMixin:
 
     # ── Connection validation ─────────────────────────────────────────────────
 
+    def _effective_generics_for_ref(self, ref: PortReference) -> dict | None:
+        """Return effective generics for a component port reference.
+
+        Merges definition defaults with instance overrides, then substitutes
+        outer design generic names wherever the instance value matches the
+        design's outer default (same name, same value).  Returns ``None`` if
+        the component or definition cannot be resolved.
+        """
+        if ref.component_id is None:
+            return None
+        comp_item = self._component_items.get(ref.component_id)
+        if comp_item is None:
+            return None
+        inst = comp_item._instance
+        defn = self._library.get(inst.definition_ref)
+        if defn is None:
+            return inst.generic_values
+        resolved: dict = {g.name: g.default_value for g in defn.generics if g.default_value is not None}
+        resolved.update(inst.generic_values)
+        outer = {g.name: g.default_value for g in self._design.component_config.generics if g.default_value is not None}
+        return {name: (name if (name in outer and val == outer[name]) else val) for name, val in resolved.items()}
+
+    def _resolve_vhdl_type(self, ref: PortReference) -> str | None:
+        """Return the VHDL type string for a port reference.
+
+        Handles both component ports (with full generic resolution) and
+        interface ports.  Returns ``None`` when the type cannot be determined.
+        """
+        if ref.interface_port_id is not None:
+            iport = next(
+                (p for p in self._design.interface_ports if p.id == ref.interface_port_id),
+                None,
+            )
+            if iport is None:
+                return None
+            return iport.effective_signal_type().to_vhdl_type()
+        if ref.component_id is not None:
+            comp_item = self._component_items.get(ref.component_id)
+            if comp_item is None:
+                return None
+            port_item = comp_item._port_items.get(ref.port_name)
+            if port_item is None:
+                return None
+            generics = self._effective_generics_for_ref(ref)
+            return port_item.get_port().signal_type.to_vhdl_type(generics)
+        return None
+
     def _resolve_fp_notation(self, ref: PortReference) -> str | None:
         """Return the FP notation (e.g. ``'U8.8'``) for a DATA port reference.
 
@@ -542,15 +589,26 @@ class _SceneConnectionMixin:
                 warnings.append(f"Signal-class mismatch: {reason}")
                 continue
 
-            # FP format mismatch — only checked for DATA↔DATA connections
+            # VHDL type mismatch — checked for DATA↔DATA connections.
+            # Uses full resolved generics (definition defaults + instance overrides
+            # + outer-design generic substitution) so symbolic generics like
+            # "WIDTH+2" are compared correctly.  If both sides resolve to the
+            # same type string the connection is valid; if notation is available
+            # for both it is used in the tooltip for readability.
             if src_class == PortSignalClass.DATA == tgt_class:
-                src_fmt = self._resolve_fp_notation(conn.source)
-                tgt_fmt = self._resolve_fp_notation(conn.target)
-                if src_fmt is not None and tgt_fmt is not None and src_fmt != tgt_fmt:
-                    reason = f"Format mismatch: {src_fmt} → {tgt_fmt}"
+                src_vtype = self._resolve_vhdl_type(conn.source)
+                tgt_vtype = self._resolve_vhdl_type(conn.target)
+                if src_vtype is not None and tgt_vtype is not None and src_vtype != tgt_vtype:
+                    src_fmt = self._resolve_fp_notation(conn.source)
+                    tgt_fmt = self._resolve_fp_notation(conn.target)
+                    reason = (
+                        f"Format mismatch: {src_fmt} → {tgt_fmt}"
+                        if src_fmt and tgt_fmt
+                        else f"Type mismatch: {src_vtype} → {tgt_vtype}"
+                    )
                     conn_item.set_invalid(True, reason)
                     warnings.append(
-                        f"Fixed-point format mismatch on "
+                        f"Signal type mismatch on "
                         f"'{conn.source.port_name}' → '{conn.target.port_name}': {reason}"
                     )
                     continue
