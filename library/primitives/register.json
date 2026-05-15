@@ -1,95 +1,75 @@
 {
-  "name": "Register",
-  "category": "primitives",
-  "description": "Basic D flip-flop register with synchronous reset",
-  "ports": [
-    {
-      "name": "clk",
-      "direction": "in",
-      "signal_type": {
-        "kind": "std_logic",
-        "width": "1",
-        "lsb": "0"
-      },
-      "position": [
-        2,
-        8
-      ],
-      "signal_class": "clock"
+    "name": "Register",
+    "category": "primitives",
+    "description": "Basic D flip-flop register with synchronous reset",
+    "ports": [
+        {
+            "name": "clk",
+            "direction": "in",
+            "signal_class": "clock",
+            "signal_type": {
+                "kind": "std_logic",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                8
+            ]
+        },
+        {
+            "name": "d",
+            "direction": "in",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                4
+            ]
+        },
+        {
+            "name": "q",
+            "direction": "out",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "WIDTH",
+                "lsb": "0"
+            },
+            "position": [
+                4,
+                4
+            ]
+        }
+    ],
+    "generics": [
+        {
+            "name": "WIDTH",
+            "data_type": "integer",
+            "default_value": 8
+        },
+        {
+            "name": "RESET_TYPE",
+            "data_type": "string",
+            "default_value": "async"
+        },
+        {
+            "name": "RESET_POLARITY",
+            "data_type": "string",
+            "default_value": "high"
+        }
+    ],
+    "visual": {
+        "width": 4,
+        "height": 8,
+        "color": "#5b9bd5"
     },
-    {
-      "name": "rst",
-      "direction": "in",
-      "signal_type": {
-        "kind": "std_logic",
-        "width": "1",
-        "lsb": "0"
-      },
-      "position": [
-        1,
-        0
-      ],
-      "signal_class": "reset"
-    },
-    {
-      "name": "d",
-      "direction": "in",
-      "signal_type": {
-        "kind": "std_logic_vector",
-        "width": "WIDTH",
-        "lsb": "0"
-      },
-      "position": [
-        0,
-        4
-      ]
-    },
-    {
-      "name": "q",
-      "direction": "out",
-      "signal_type": {
-        "kind": "std_logic_vector",
-        "width": "WIDTH",
-        "lsb": "0"
-      },
-      "position": [
-        4,
-        4
-      ]
+    "latency": 1,
+    "behavior": {
+        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\n# RESET_TYPE (sync|async) and RESET_POLARITY (high|low) control reset behaviour.\nreturn d"
     }
-  ],
-  "generics": [
-    {
-      "name": "WIDTH",
-      "data_type": "integer",
-      "default_value": 8
-    },
-    {
-      "name": "RESET_TYPE",
-      "data_type": "string",
-      "default_value": "async",
-      "options": [
-        "async",
-        "sync"
-      ]
-    },
-    {
-      "name": "RESET_POLARITY",
-      "data_type": "string",
-      "default_value": "high",
-      "options": [
-        "high",
-        "low"
-      ]
-    }
-  ],
-  "visual": {
-    "width": 4,
-    "height": 8,
-    "color": "#5b9bd5"
-  },
-  "latency": 1,
-  "behavior": {
-    "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\n# RESET_TYPE (sync|async) and RESET_POLARITY (high|low) control reset behaviour.\nreturn d"
-  }
 }

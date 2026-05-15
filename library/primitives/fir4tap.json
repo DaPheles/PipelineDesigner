@@ -6,6 +6,7 @@
         {
             "name": "clk",
             "direction": "in",
+            "signal_class": "clock",
             "signal_type": {
                 "kind": "std_logic",
                 "width": "1",
@@ -14,53 +15,52 @@
             "position": [
                 2,
                 6
-            ],
-            "signal_class": "clock"
+            ]
         },
         {
             "name": "x",
             "direction": "in",
+            "signal_class": "data",
             "signal_type": {
-                "kind": "std_logic_vector",
-                "width": "WIDTH",
+                "kind": "sfixed",
+                "width": "X_WIDTH",
                 "lsb": "LSB"
             },
             "position": [
                 0,
                 3
-            ],
-            "signal_class": "data"
+            ]
         },
         {
             "name": "y",
             "direction": "out",
+            "signal_class": "data",
             "signal_type": {
-                "kind": "std_logic_vector",
+                "kind": "sfixed",
                 "width": "Y_WIDTH",
                 "lsb": "LSB"
             },
             "position": [
                 4,
                 3
-            ],
-            "signal_class": "data"
+            ]
         }
     ],
     "generics": [
         {
-            "name": "WIDTH",
+            "name": "X_WIDTH",
             "data_type": "integer",
             "default_value": 16
-        },
-        {
-            "name": "LSB",
-            "data_type": "integer",
-            "default_value": -15
         },
         {
             "name": "Y_WIDTH",
             "data_type": "integer",
             "default_value": 18
+        },
+        {
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": -15
         },
         {
             "name": "H0",

@@ -1,14 +1,14 @@
 {
-    "name": "FP_Resize_S2U",
+    "name": "FP_U2U",
     "category": "primitives",
-    "description": "FixedPoint convertion from signed to unsigned",
+    "description": "FixedPoint convertion of unsigned numbers",
     "ports": [
         {
             "name": "a",
             "direction": "in",
             "signal_class": "data",
             "signal_type": {
-                "kind": "sfixed",
+                "kind": "ufixed",
                 "width": "A_WIDTH",
                 "lsb": "A_LSB"
             },

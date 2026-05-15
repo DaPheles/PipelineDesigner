@@ -21,6 +21,7 @@ from pipeline_designer.presentation.canvas import DesignScene, DesignView
 from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, InterfacePortItem, PortItem
 from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
 from pipeline_designer.presentation.simulation import DesignSimulationPanel
+from pipeline_designer.presentation.vhdl_export import VhdlExportPanel
 
 from .config import AppConfig
 
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
 
         self._config = config or AppConfig()
         self._library_loader = LibraryLoader()
+        self._library_dict: dict[str, ComponentDefinition] = {}
         self._current_file: Path | None = None
         self._primitive_editor = None  # lazy-created singleton
 
@@ -93,6 +95,22 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._sim_dock)
         self.resizeDocks([self._sim_dock], [260], Qt.Orientation.Vertical)
+
+        # VHDL export panel (bottom dock, hidden by default)
+        self._vhdl_panel = VhdlExportPanel(
+            design_getter=self._scene.get_design,
+            library_getter=lambda: self._library_dict,
+        )
+        self._vhdl_dock = QDockWidget("VHDL Export", self)
+        self._vhdl_dock.setWidget(self._vhdl_panel)
+        self._vhdl_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._vhdl_dock)
+        self.tabifyDockWidget(self._sim_dock, self._vhdl_dock)
+        self._vhdl_dock.hide()
 
         # Connect signals
         self._view.zoom_changed.connect(self._on_zoom_changed)
@@ -163,14 +181,23 @@ class MainWindow(QMainWindow):
         primitive_editor_action.triggered.connect(self._on_primitive_editor)
         library_menu.addAction(primitive_editor_action)
 
+        tools_menu = menu_bar.addMenu("&Tools")
+
+        export_vhdl_action = QAction("&Export VHDL…", self)
+        export_vhdl_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
+        export_vhdl_action.setCheckable(True)
+        export_vhdl_action.triggered.connect(lambda checked: self._vhdl_dock.setVisible(checked))
+        self._vhdl_dock.visibilityChanged.connect(lambda vis: export_vhdl_action.setChecked(vis))
+        tools_menu.addAction(export_vhdl_action)
+
         simulate_menu = menu_bar.addMenu("&Simulate")
 
         toggle_sim_action = QAction("&Show Simulation Panel", self)
         toggle_sim_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         toggle_sim_action.setCheckable(True)
         toggle_sim_action.setChecked(True)
-        toggle_sim_action.triggered.connect(self._sim_dock.setVisible)
-        self._sim_dock.visibilityChanged.connect(toggle_sim_action.setChecked)
+        toggle_sim_action.triggered.connect(lambda checked: self._sim_dock.setVisible(checked))
+        self._sim_dock.visibilityChanged.connect(lambda vis: toggle_sim_action.setChecked(vis))
         simulate_menu.addAction(toggle_sim_action)
 
         view_menu = menu_bar.addMenu("&View")
@@ -204,11 +231,9 @@ class MainWindow(QMainWindow):
         self._palette.set_components(components)
 
         # Set library on scene with loader for composite component support
-        library_dict: dict[str, ComponentDefinition] = {
-            c.name: c for c in components
-        }
-        self._scene.set_library(library_dict, self._library_loader)
-        self._sim_panel.set_library(library_dict)
+        self._library_dict = {c.name: c for c in components}
+        self._scene.set_library(self._library_dict, self._library_loader)
+        self._sim_panel.set_library(self._library_dict)
 
         self._status_bar.showMessage(f"Loaded {len(components)} components")
 

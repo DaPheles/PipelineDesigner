@@ -1,7 +1,7 @@
 {
-    "name": "FP_Resize_U2U",
+    "name": "FP_U2S",
     "category": "primitives",
-    "description": "FixedPoint convertion of unsigned numbers",
+    "description": "FixedPoint convertion from unsigned to signed",
     "ports": [
         {
             "name": "a",
@@ -22,7 +22,7 @@
             "direction": "out",
             "signal_class": "data",
             "signal_type": {
-                "kind": "ufixed",
+                "kind": "sfixed",
                 "width": "Q_WIDTH",
                 "lsb": "Q_LSB"
             },
@@ -66,6 +66,6 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "q_max = (1 << (Q_WIDTH+Q_LSB)) - 1\nq_min = 0\nq_clamped = q_min if a <= q_min else q_max if a >= q_max else a\nreturn q_clamped if CLAMP_EN else a"
+        "code": "q_max = (1 << (Q_WIDTH+Q_LSB-1)) - 1\nq_min = -(1 << (Q_WIDTH+Q_LSB-1))\nq_clamped = q_min if a <= q_min else q_max if a >= q_max else a\nreturn q_clamped if CLAMP_EN else a"
     }
 }

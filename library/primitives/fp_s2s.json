@@ -1,5 +1,5 @@
 {
-    "name": "FP_Resize_S2S",
+    "name": "FP_S2S",
     "category": "primitives",
     "description": "FixedPoint convertion of signed numbers",
     "ports": [

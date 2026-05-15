@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from .component import Generic
 from .instance import ComponentInstance, Connection, InterfaceDirection, InterfacePort
 from .stage import Stage
 
@@ -46,6 +47,7 @@ class ComponentConfig(BaseModel):
     color: str = Field(default="#9b59b6", description="Component color (hex)")
     width: int = Field(default=8, description="Visual width in grid units")
     height: int = Field(default=6, description="Visual height in grid units")
+    generics: list[Generic] = Field(default_factory=list, description="VHDL generics for the exported entity")
 
 
 class Design(BaseModel):
