@@ -318,19 +318,9 @@ class MainWindow(QMainWindow):
             self._save_to_file(Path(file_path))
 
     def _save_to_file(self, path: Path) -> None:
-        """Save the design to a file, silently dropping invalid connections."""
+        """Save the design to a file."""
         try:
             design = self._scene.get_design()
-            invalid_ids = self._scene.get_invalid_connection_ids()
-            if invalid_ids:
-                design = design.model_copy(
-                    update={"connections": [
-                        c for c in design.connections if c.id not in invalid_ids
-                    ]}
-                )
-                self._status_bar.showMessage(
-                    f"Saved (dropped {len(invalid_ids)} invalid connection(s))", 5000
-                )
             json_str = design.model_dump_json(indent=2)
             path.write_text(json_str)
 

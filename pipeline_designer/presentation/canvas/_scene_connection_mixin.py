@@ -516,6 +516,69 @@ class _SceneConnectionMixin:
             return port_item.get_port().signal_type.to_vhdl_type(generics)
         return None
 
+    def _resolve_signal_type_key(self, ref: PortReference) -> tuple | None:
+        """Return a ``(kind, width, lsb)`` tuple with expressions evaluated to integers.
+
+        Substitutes outer design concrete defaults so that algebraically equivalent
+        expressions like ``WIDTH+4+1`` and ``WIDTH+5`` compare equal.  Returns
+        ``None`` when the type cannot be fully resolved to integers.
+        """
+        from pipeline_designer.domain.models.behavior import _eval_index, _substitute_generics, _SCALAR_KINDS
+
+        if ref.interface_port_id is not None:
+            iport = next(
+                (p for p in self._design.interface_ports if p.id == ref.interface_port_id),
+                None,
+            )
+            if iport is None:
+                return None
+            st = iport.effective_signal_type()
+            int_generics: dict[str, int] = {}
+        elif ref.component_id is not None:
+            comp_item = self._component_items.get(ref.component_id)
+            if comp_item is None:
+                return None
+            port_item = comp_item._port_items.get(ref.port_name)
+            if port_item is None:
+                return None
+            st = port_item.get_port().signal_type
+            inst = comp_item._instance
+            defn = self._library.get(inst.definition_ref)
+            resolved: dict = {}
+            if defn is not None:
+                resolved = {g.name: g.default_value for g in defn.generics if g.default_value is not None}
+            resolved.update(inst.generic_values)
+            # Concrete outer design defaults used to evaluate symbolic expressions
+            outer_concrete: dict[str, int] = {
+                g.name: int(g.default_value)
+                for g in self._design.component_config.generics
+                if g.default_value is not None and isinstance(g.default_value, (int, float))
+                and not isinstance(g.default_value, bool)
+            }
+            # Resolve string-valued generics (e.g. "WIDTH+2") using outer concrete values
+            for name, val in list(resolved.items()):
+                if isinstance(val, str):
+                    try:
+                        resolved[name] = _eval_index(_substitute_generics(val, outer_concrete), outer_concrete)
+                    except (ValueError, KeyError):
+                        pass
+            int_generics = {k: int(v) for k, v in {**outer_concrete, **resolved}.items()
+                           if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        else:
+            return None
+
+        k = st.resolved_kind(int_generics)
+        if k is None:
+            return None
+        if k in _SCALAR_KINDS:
+            return (k.value, 0, 0)
+        try:
+            w = _eval_index(_substitute_generics(st.width, int_generics), int_generics)
+            l = _eval_index(_substitute_generics(st.lsb,   int_generics), int_generics)
+            return (k.value, w, l)
+        except (ValueError, KeyError):
+            return None
+
     def _resolve_fp_notation(self, ref: PortReference) -> str | None:
         """Return the FP notation (e.g. ``'U8.8'``) for a DATA port reference.
 
@@ -590,22 +653,33 @@ class _SceneConnectionMixin:
                 continue
 
             # VHDL type mismatch — checked for DATA↔DATA connections.
-            # Uses full resolved generics (definition defaults + instance overrides
-            # + outer-design generic substitution) so symbolic generics like
-            # "WIDTH+2" are compared correctly.  If both sides resolve to the
-            # same type string the connection is valid; if notation is available
-            # for both it is used in the tooltip for readability.
+            # Prefer integer-tuple comparison (kind, width, lsb) so algebraically
+            # equivalent expressions like WIDTH+4+1 and WIDTH+5 compare equal.
+            # Falls back to VHDL type string comparison when outer generics are
+            # not concrete enough to evaluate.
             if src_class == PortSignalClass.DATA == tgt_class:
-                src_vtype = self._resolve_vhdl_type(conn.source)
-                tgt_vtype = self._resolve_vhdl_type(conn.target)
-                if src_vtype is not None and tgt_vtype is not None and src_vtype != tgt_vtype:
+                src_key = self._resolve_signal_type_key(conn.source)
+                tgt_key = self._resolve_signal_type_key(conn.target)
+                if src_key is not None and tgt_key is not None:
+                    type_mismatch = src_key != tgt_key
+                else:
+                    src_vtype = self._resolve_vhdl_type(conn.source)
+                    tgt_vtype = self._resolve_vhdl_type(conn.target)
+                    type_mismatch = (
+                        src_vtype is not None and tgt_vtype is not None
+                        and src_vtype != tgt_vtype
+                    )
+                if type_mismatch:
                     src_fmt = self._resolve_fp_notation(conn.source)
                     tgt_fmt = self._resolve_fp_notation(conn.target)
-                    reason = (
-                        f"Format mismatch: {src_fmt} → {tgt_fmt}"
-                        if src_fmt and tgt_fmt
-                        else f"Type mismatch: {src_vtype} → {tgt_vtype}"
-                    )
+                    if src_fmt and tgt_fmt:
+                        reason = f"Format mismatch: {src_fmt} → {tgt_fmt}"
+                    elif src_key and tgt_key:
+                        reason = f"Type mismatch: {src_key[0]}({src_key[1]},{src_key[2]}) → {src_key[0]}({tgt_key[1]},{tgt_key[2]})"
+                    else:
+                        src_vtype = self._resolve_vhdl_type(conn.source)
+                        tgt_vtype = self._resolve_vhdl_type(conn.target)
+                        reason = f"Type mismatch: {src_vtype} → {tgt_vtype}"
                     conn_item.set_invalid(True, reason)
                     warnings.append(
                         f"Signal type mismatch on "
