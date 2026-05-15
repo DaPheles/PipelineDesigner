@@ -23,6 +23,7 @@ from pipeline_designer.domain.models import (
     ComponentDefinition,
     ComponentInstance,
     Connection,
+    Design,
     Generic,
     InterfaceDirection,
     InterfacePort,
@@ -35,6 +36,11 @@ from pipeline_designer.domain.models.signal_constraints import (
     ALLOWED_KINDS,
     default_signal_type,
 )
+from pipeline_designer.presentation.panels.component_tables import (
+    InstanceGenericTable,
+    PortInfoTable,
+)
+from pipeline_designer.presentation.primitive_editor.generic_table import GenericTable
 
 
 def _int_or(s: str, default: int) -> int:
@@ -44,42 +50,46 @@ def _int_or(s: str, default: int) -> int:
         return default
 
 
+def _sep() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setFrameShadow(QFrame.Shadow.Sunken)
+    return f
+
+
+def _section_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-weight: bold; color: #aaa; margin-top: 4px;")
+    return lbl
+
+
 class PropertyEditor(QWidget):
     """Panel for editing properties of selected components or connections.
 
-    Shows editable properties when a single item is selected.
-    Clears when nothing is selected or multiple items are selected.
+    Shows editable properties when a single item is selected; shows design-level
+    entity generics when nothing is selected.
     """
 
-    # Emitted when a component property changes: (instance_id, property_name, new_value)
     property_changed = Signal(object, str, object)
-    # Emitted when a connection property changes: (connection_id, property_name, new_value)
     connection_changed = Signal(object, str, object)
-    # Emitted when a port property changes: (component_id, port_name, property_name, new_value)
     port_changed = Signal(object, str, str, object)
-    # Emitted when an interface port property changes: (port_id, property_name, new_value)
     interface_port_changed = Signal(object, str, object)
-    # Emitted when the user requests rename or clone
     rename_requested = Signal()
     clone_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        """Initialize the property editor.
-
-        Args:
-            parent: Parent widget.
-        """
         super().__init__(parent)
 
-        self._current_instance: ComponentInstance | None = None
-        self._current_definition: ComponentDefinition | None = None
-        self._current_connection: Connection | None = None
-        self._current_port: Port | None = None
-        self._current_port_component_id: UUID | None = None
-        self._current_interface_port: InterfacePort | None = None
+        self._current_instance:    ComponentInstance | None  = None
+        self._current_definition:  ComponentDefinition | None = None
+        self._current_connection:  Connection | None          = None
+        self._current_port:        Port | None                = None
+        self._current_port_component_id: UUID | None          = None
+        self._current_interface_port: InterfacePort | None    = None
+        self._current_design:      Design | None              = None
+
         self._property_widgets: dict[str, QWidget] = {}
 
-        # Data types selectable for DATA-class interface ports
         self._data_data_types = [
             SignalKind.UFIXED.value,
             SignalKind.SFIXED.value,
@@ -87,8 +97,9 @@ class PropertyEditor(QWidget):
 
         self._setup_ui()
 
+    # ── UI construction ───────────────────────────────────────────────────────
+
     def _setup_ui(self) -> None:
-        """Set up the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -110,91 +121,123 @@ class PropertyEditor(QWidget):
         header_layout.addWidget(rename_btn)
 
         layout.addWidget(design_header)
+        layout.addWidget(_sep())
 
-        header_sep = QFrame()
-        header_sep.setFrameShape(QFrame.Shape.HLine)
-        header_sep.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(header_sep)
-
-        # Scroll area for properties
+        # Scrollable property area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(scroll)
 
-        # Container widget for form
         self._container = QWidget()
-        self._form_layout = QFormLayout(self._container)
+        self._form_layout = QVBoxLayout(self._container)
         self._form_layout.setContentsMargins(8, 8, 8, 8)
-        self._form_layout.setSpacing(8)
+        self._form_layout.setSpacing(4)
         scroll.setWidget(self._container)
 
-        # Title label
         self._title_label = QLabel("No Selection")
         self._title_label.setStyleSheet("font-weight: bold; font-size: 12px;")
-        self._form_layout.addRow(self._title_label)
+        self._form_layout.addWidget(self._title_label)
+        self._form_layout.addWidget(_sep())
 
-        # Separator
-        self._separator = QFrame()
-        self._separator.setFrameShape(QFrame.Shape.HLine)
-        self._separator.setFrameShadow(QFrame.Shadow.Sunken)
-        self._form_layout.addRow(self._separator)
-
-        # Content area (will be populated dynamically)
+        # Content widget — holds the dynamic property form
         self._content_widget = QWidget()
         self._content_layout = QFormLayout(self._content_widget)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(6)
-        self._form_layout.addRow(self._content_widget)
+        self._form_layout.addWidget(self._content_widget)
+        self._form_layout.addStretch()
 
         self._show_empty()
 
+    # ── State management ──────────────────────────────────────────────────────
+
     def _clear_content(self) -> None:
-        """Clear all property widgets."""
         while self._content_layout.rowCount() > 0:
             self._content_layout.removeRow(0)
         self._property_widgets.clear()
 
     def _show_empty(self) -> None:
-        """Show empty state (no selection)."""
         self._clear_content()
-        self._title_label.setText("No Selection")
-        self._current_instance = None
-        self._current_definition = None
-        self._current_connection = None
-        self._current_port = None
+        self._current_instance       = None
+        self._current_definition     = None
+        self._current_connection     = None
+        self._current_port           = None
         self._current_port_component_id = None
         self._current_interface_port = None
+        if self._current_design is not None:
+            self._show_design_generics()
+        else:
+            self._title_label.setText("No Selection")
 
     def clear(self) -> None:
-        """Clear the property editor (public interface)."""
         self._show_empty()
 
     def set_design_name(self, name: str) -> None:
-        """Update the design name shown in the header."""
         self._design_name_label.setText(name)
+
+    def set_design(self, design: Design) -> None:
+        """Call whenever a new design is loaded or created.
+
+        Updates the design reference and refreshes the panel if no item is
+        currently selected (so the design-level generics stay current).
+        """
+        self._current_design = design
+        if (self._current_instance is None
+                and self._current_connection is None
+                and self._current_port is None
+                and self._current_interface_port is None):
+            self._show_design_generics()
+
+    # ── Design-level generics view (no-selection state) ───────────────────────
+
+    def _show_design_generics(self) -> None:
+        """Show design entity generics when nothing is selected."""
+        self._clear_content()
+        self._title_label.setText("Design Properties")
+
+        if self._current_design is None:
+            return
+
+        info_lbl = QLabel(
+            "Define VHDL entity generics for export.  "
+            "Instance generic values may reference these by name."
+        )
+        info_lbl.setWordWrap(True)
+        info_lbl.setStyleSheet("color: #888; font-size: 9pt;")
+        self._content_layout.addRow(info_lbl)
+
+        self._design_generic_table = GenericTable()
+        self._design_generic_table.set_generics(
+            self._current_design.component_config.generics
+        )
+        self._design_generic_table.data_changed.connect(
+            self._on_design_generics_changed
+        )
+        self._content_layout.addRow(self._design_generic_table)
+        self._property_widgets["design_generics"] = self._design_generic_table
+
+    def _on_design_generics_changed(self) -> None:
+        tbl = self._property_widgets.get("design_generics")
+        if isinstance(tbl, GenericTable) and self._current_design is not None:
+            self._current_design.component_config.generics = tbl.get_generics()
+
+    # ── Component view ────────────────────────────────────────────────────────
 
     def set_component(
         self,
         instance: ComponentInstance,
         definition: ComponentDefinition | None = None,
     ) -> None:
-        """Set the component to edit.
-
-        Args:
-            instance: The component instance to edit.
-            definition: The component definition (for generic info).
-        """
         self._clear_content()
-        self._current_instance = instance
+        self._current_instance   = instance
         self._current_definition = definition
         self._current_connection = None
 
-        # Title
         type_name = definition.name if definition else instance.definition_ref
         self._title_label.setText(f"Component: {type_name}")
 
-        # Instance name
+        # ── Instance name ─────────────────────────────────────────────────
         name_edit = QLineEdit()
         name_edit.setText(instance.instance_name or "")
         name_edit.setPlaceholderText(instance.get_display_name())
@@ -204,102 +247,79 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Instance Name:", name_edit)
         self._property_widgets["instance_name"] = name_edit
 
-        # Component type (read-only)
+        # ── Type (read-only) ──────────────────────────────────────────────
         type_label = QLabel(type_name)
         type_label.setStyleSheet("color: #888;")
         self._content_layout.addRow("Type:", type_label)
 
-        # Composite component info
+        # ── Composite info ────────────────────────────────────────────────
         if instance.is_composite:
-            composite_label = QLabel("Yes")
-            composite_label.setStyleSheet("color: #9b59b6; font-weight: bold;")
-            self._content_layout.addRow("Composite:", composite_label)
+            comp_lbl = QLabel("Yes")
+            comp_lbl.setStyleSheet("color: #9b59b6; font-weight: bold;")
+            self._content_layout.addRow("Composite:", comp_lbl)
+            lat_lbl = QLabel(f"{instance.stage_count} stage(s)")
+            lat_lbl.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Latency:", lat_lbl)
 
-            latency_label = QLabel(f"{instance.stage_count} stage(s)")
-            latency_label.setStyleSheet("color: #888;")
-            self._content_layout.addRow("Latency:", latency_label)
-
-        # Pipeline stage (read-only, if set)
+        # ── Pipeline stage ────────────────────────────────────────────────
         if instance.pipeline_stage is not None:
             if instance.is_composite and instance.stage_count > 1:
-                end_stage = instance.get_end_stage()
-                stage_text = f"Stage {instance.pipeline_stage} - {end_stage}"
+                stage_text = f"Stage {instance.pipeline_stage} – {instance.get_end_stage()}"
             else:
                 stage_text = f"Stage {instance.pipeline_stage}"
-            stage_label = QLabel(stage_text)
-            stage_label.setStyleSheet("color: #888;")
-            self._content_layout.addRow("Pipeline Stage:", stage_label)
+            stage_lbl = QLabel(stage_text)
+            stage_lbl.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Pipeline Stage:", stage_lbl)
 
-        # Position (read-only)
-        pos_label = QLabel(f"({instance.position[0]:.0f}, {instance.position[1]:.0f})")
-        pos_label.setStyleSheet("color: #888;")
-        self._content_layout.addRow("Position:", pos_label)
+        # ── Position (read-only) ──────────────────────────────────────────
+        pos_lbl = QLabel(
+            f"({instance.position[0]:.0f}, {instance.position[1]:.0f})"
+        )
+        pos_lbl.setStyleSheet("color: #888;")
+        self._content_layout.addRow("Position:", pos_lbl)
+        self._property_widgets["position"] = pos_lbl
 
-        # Generics section
+        # ── Generics table ────────────────────────────────────────────────
         if definition and definition.generics:
-            # Separator before generics
-            sep = QFrame()
-            sep.setFrameShape(QFrame.Shape.HLine)
-            sep.setFrameShadow(QFrame.Shadow.Sunken)
-            self._content_layout.addRow(sep)
+            self._content_layout.addRow(_sep())
+            self._content_layout.addRow(_section_label("Generics"))
 
-            generics_label = QLabel("Generics")
-            generics_label.setStyleSheet("font-weight: bold; color: #aaa;")
-            self._content_layout.addRow(generics_label)
-
-            for generic in definition.generics:
-                widget = self._create_generic_widget(generic, instance)
-                self._content_layout.addRow(f"{generic.name}:", widget)
-                self._property_widgets[f"generic_{generic.name}"] = widget
-
-    def _create_generic_widget(
-        self, generic: Generic, instance: ComponentInstance
-    ) -> QWidget:
-        """Create an appropriate widget for a generic parameter.
-
-        Args:
-            generic: The generic definition.
-            instance: The component instance.
-
-        Returns:
-            Widget for editing the generic value.
-        """
-        current_value = instance.generic_values.get(generic.name, generic.default_value)
-
-        if generic.data_type == "integer":
-            widget = QSpinBox()
-            widget.setRange(-2147483648, 2147483647)
-            widget.setValue(int(current_value) if current_value is not None else 0)
-            widget.valueChanged.connect(
-                lambda v: self._on_generic_changed(generic.name, v)
+            design_gens = (
+                [g.name for g in self._current_design.component_config.generics]
+                if self._current_design else []
             )
-        elif generic.data_type == "real" or generic.data_type == "float":
-            widget = QDoubleSpinBox()
-            widget.setRange(-1e308, 1e308)
-            widget.setDecimals(6)
-            widget.setValue(float(current_value) if current_value is not None else 0.0)
-            widget.valueChanged.connect(
-                lambda v: self._on_generic_changed(generic.name, v)
-            )
-        elif generic.data_type == "boolean" or generic.data_type == "bool":
-            widget = QSpinBox()
-            widget.setRange(0, 1)
-            widget.setValue(1 if current_value else 0)
-            widget.valueChanged.connect(
-                lambda v: self._on_generic_changed(generic.name, bool(v))
-            )
-        else:
-            # Default to string/text
-            widget = QLineEdit()
-            widget.setText(str(current_value) if current_value is not None else "")
-            widget.editingFinished.connect(
-                lambda: self._on_generic_changed(generic.name, widget.text())
-            )
+            hint = ""
+            if design_gens:
+                hint = "  (design generics: " + ", ".join(design_gens) + ")"
+            hint_lbl = QLabel("Enter a number or a design-generic name." + hint)
+            hint_lbl.setWordWrap(True)
+            hint_lbl.setStyleSheet("color: #666; font-size: 8pt;")
+            self._content_layout.addRow(hint_lbl)
 
-        return widget
+            gen_table = InstanceGenericTable()
+            gen_table.set_data(definition.generics, instance.generic_values)
+            gen_table.value_changed.connect(self._on_generic_changed)
+            self._content_layout.addRow(gen_table)
+            self._property_widgets["instance_generics"] = gen_table
+
+        # ── Ports table ───────────────────────────────────────────────────
+        if definition and definition.ports:
+            self._content_layout.addRow(_sep())
+            self._content_layout.addRow(_section_label("Ports"))
+
+            resolved = {
+                g.name: g.default_value
+                for g in (definition.generics if definition else [])
+                if g.default_value is not None
+            }
+            resolved.update(instance.generic_values)
+
+            port_table = PortInfoTable()
+            port_table.set_ports(definition.ports, resolved)
+            self._content_layout.addRow(port_table)
+            self._property_widgets["port_info"] = port_table
 
     def _on_instance_name_changed(self, name: str) -> None:
-        """Handle instance name change."""
         if self._current_instance:
             new_name = name.strip() if name.strip() else None
             self._current_instance.instance_name = new_name
@@ -308,12 +328,13 @@ class PropertyEditor(QWidget):
             )
 
     def _on_generic_changed(self, generic_name: str, value: Any) -> None:
-        """Handle generic value change."""
         if self._current_instance:
             self._current_instance.generic_values[generic_name] = value
             self.property_changed.emit(
                 self._current_instance.id, f"generic.{generic_name}", value
             )
+
+    # ── Connection view ───────────────────────────────────────────────────────
 
     def set_connection(
         self,
@@ -321,21 +342,13 @@ class PropertyEditor(QWidget):
         source_name: str = "",
         target_name: str = "",
     ) -> None:
-        """Set the connection to display.
-
-        Args:
-            connection: The connection to display.
-            source_name: Display name for source component.
-            target_name: Display name for target component.
-        """
         self._clear_content()
-        self._current_instance = None
+        self._current_instance   = None
         self._current_definition = None
         self._current_connection = connection
 
         self._title_label.setText("Connection")
 
-        # Signal name (editable)
         signal_edit = QLineEdit()
         signal_edit.setText(connection.signal_name or "")
         signal_edit.setPlaceholderText(connection.get_display_name())
@@ -345,37 +358,29 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Signal Name:", signal_edit)
         self._property_widgets["signal_name"] = signal_edit
 
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        self._content_layout.addRow(sep)
+        self._content_layout.addRow(_sep())
 
-        # Source info (read-only)
-        source_text = f"{source_name}.{connection.source.port_name}"
-        source_label = QLabel(source_text)
-        source_label.setStyleSheet("color: #ed7d31;")  # Orange for output
-        self._content_layout.addRow("Source:", source_label)
+        src_lbl = QLabel(f"{source_name}.{connection.source.port_name}")
+        src_lbl.setStyleSheet("color: #ed7d31;")
+        self._content_layout.addRow("Source:", src_lbl)
 
-        # Target info (read-only)
-        target_text = f"{target_name}.{connection.target.port_name}"
-        target_label = QLabel(target_text)
-        target_label.setStyleSheet("color: #70ad47;")  # Green for input
-        self._content_layout.addRow("Target:", target_label)
+        tgt_lbl = QLabel(f"{target_name}.{connection.target.port_name}")
+        tgt_lbl.setStyleSheet("color: #70ad47;")
+        self._content_layout.addRow("Target:", tgt_lbl)
 
-        # Connection ID (read-only, abbreviated)
-        id_label = QLabel(str(connection.id)[:8])
-        id_label.setStyleSheet("color: #888; font-family: monospace;")
-        self._content_layout.addRow("ID:", id_label)
+        id_lbl = QLabel(str(connection.id)[:8])
+        id_lbl.setStyleSheet("color: #888; font-family: monospace;")
+        self._content_layout.addRow("ID:", id_lbl)
 
     def _on_signal_name_changed(self, name: str) -> None:
-        """Handle signal name change."""
         if self._current_connection:
             new_name = name.strip() if name.strip() else None
             self._current_connection.signal_name = new_name
             self.connection_changed.emit(
                 self._current_connection.id, "signal_name", new_name
             )
+
+    # ── Port view ─────────────────────────────────────────────────────────────
 
     def set_port(
         self,
@@ -384,27 +389,16 @@ class PropertyEditor(QWidget):
         component_name: str = "",
         generic_values: dict | None = None,
     ) -> None:
-        """Set the port to edit.
-
-        Args:
-            port: The port to edit.
-            component_id: ID of the component this port belongs to.
-            component_name: Display name of the parent component.
-            generic_values: Instance generic values used to resolve symbolic
-                width/lsb expressions (e.g. ``{'FRAC_BITS': 8}``).
-        """
         self._clear_content()
-        self._current_instance = None
+        self._current_instance   = None
         self._current_definition = None
         self._current_connection = None
-        self._current_port = port
+        self._current_port       = port
         self._current_port_component_id = component_id
 
-        # Title
         direction_str = "Input" if port.direction == PortDirection.IN else "Output"
         self._title_label.setText(f"Port ({direction_str})")
 
-        # Port name (editable)
         name_edit = QLineEdit()
         name_edit.setText(port.name)
         name_edit.editingFinished.connect(
@@ -413,7 +407,6 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["port_name"] = name_edit
 
-        # Signal class (editable combo)
         sc_combo = QComboBox()
         for member in PortSignalClass:
             sc_combo.addItem(member.value)
@@ -422,53 +415,42 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Signal Class:", sc_combo)
         self._property_widgets["port_signal_class"] = sc_combo
 
-        # Signal type (read-only)
         st = port.signal_type
-        g = generic_values or {}
+        g  = generic_values or {}
         is_data = port.signal_class == PortSignalClass.DATA
-        # For DATA ports show just the kind ("ufixed"); for others show the VHDL type.
         type_text = st.kind if is_data else st.to_vhdl_type(g)
-        type_label = QLabel(type_text)
-        type_label.setStyleSheet("color: #888;")
-        self._content_layout.addRow("Signal Type:", type_label)
+        type_lbl = QLabel(type_text)
+        type_lbl.setStyleSheet("color: #888;")
+        self._content_layout.addRow("Signal Type:", type_lbl)
 
-        # Format (derived from width/lsb — DATA ports only)
         if is_data:
             notation = st.notation(g)
-            vhdl = st.to_vhdl_type(g)
+            vhdl     = st.to_vhdl_type(g)
             fmt_text = f"{notation}  ·  {vhdl}" if notation else vhdl
-            fmt_label = QLabel(fmt_text)
-            fmt_label.setStyleSheet("color: #89dceb; font-family: monospace;")
-            self._content_layout.addRow("Format:", fmt_label)
+            fmt_lbl  = QLabel(fmt_text)
+            fmt_lbl.setStyleSheet("color: #89dceb; font-family: monospace;")
+            self._content_layout.addRow("Format:", fmt_lbl)
 
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        self._content_layout.addRow(sep)
+        self._content_layout.addRow(_sep())
 
-        # Direction (read-only)
-        direction_label = QLabel(port.direction.value)
+        dir_lbl = QLabel(port.direction.value)
         if port.direction == PortDirection.IN:
-            direction_label.setStyleSheet("color: #70ad47;")  # Green for input
+            dir_lbl.setStyleSheet("color: #70ad47;")
         else:
-            direction_label.setStyleSheet("color: #ed7d31;")  # Orange for output
-        self._content_layout.addRow("Direction:", direction_label)
+            dir_lbl.setStyleSheet("color: #ed7d31;")
+        self._content_layout.addRow("Direction:", dir_lbl)
 
-        # Parent component (read-only)
         if component_name:
-            comp_label = QLabel(component_name)
-            comp_label.setStyleSheet("color: #888;")
-            self._content_layout.addRow("Component:", comp_label)
+            comp_lbl = QLabel(component_name)
+            comp_lbl.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Component:", comp_lbl)
 
-        # Position (read-only, if set)
         if port.position:
-            pos_label = QLabel(f"({port.position[0]}, {port.position[1]})")
-            pos_label.setStyleSheet("color: #888;")
-            self._content_layout.addRow("Position:", pos_label)
+            pos_lbl = QLabel(f"({port.position[0]}, {port.position[1]})")
+            pos_lbl.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Position:", pos_lbl)
 
     def _on_port_name_changed(self, name: str) -> None:
-        """Handle port name change."""
         if self._current_port and self._current_port_component_id:
             old_name = self._current_port.name
             new_name = name.strip()
@@ -479,7 +461,6 @@ class PropertyEditor(QWidget):
                 )
 
     def _on_port_signal_class_changed(self, value: str) -> None:
-        """Handle signal-class combo change."""
         if not self._current_port or not self._current_port_component_id:
             return
         try:
@@ -496,20 +477,24 @@ class PropertyEditor(QWidget):
             new_sc,
         )
 
+    # ── Interface port view ───────────────────────────────────────────────────
+
     def set_interface_port(self, interface_port: InterfacePort) -> None:
-        """Set the interface port to edit."""
         self._clear_content()
-        self._current_instance = None
-        self._current_definition = None
-        self._current_connection = None
-        self._current_port = None
+        self._current_instance       = None
+        self._current_definition     = None
+        self._current_connection     = None
+        self._current_port           = None
         self._current_port_component_id = None
         self._current_interface_port = interface_port
 
-        direction_str = "Input" if interface_port.direction == InterfaceDirection.INPUT else "Output"
+        direction_str = (
+            "Input"
+            if interface_port.direction == InterfaceDirection.INPUT
+            else "Output"
+        )
         self._title_label.setText(f"Interface Port ({direction_str})")
 
-        # Port name (editable)
         name_edit = QLineEdit()
         name_edit.setText(interface_port.name)
         name_edit.editingFinished.connect(
@@ -518,7 +503,6 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Name:", name_edit)
         self._property_widgets["interface_port_name"] = name_edit
 
-        # Signal class (editable — drives whether type widget is read-only)
         isc_combo = QComboBox()
         for member in PortSignalClass:
             isc_combo.addItem(member.value)
@@ -526,42 +510,39 @@ class PropertyEditor(QWidget):
         self._content_layout.addRow("Signal Class:", isc_combo)
         self._property_widgets["interface_port_signal_class"] = isc_combo
 
-        # Signal type — read-only label for clock/reset/control, combo for data
-        self._rebuild_interface_type_widget(interface_port.signal_class, interface_port.data_type)
+        self._rebuild_interface_type_widget(
+            interface_port.signal_class, interface_port.data_type
+        )
+        isc_combo.currentTextChanged.connect(
+            self._on_interface_port_signal_class_changed
+        )
 
-        # Connect signal class AFTER type widget is created so the rebuild sees it
-        isc_combo.currentTextChanged.connect(self._on_interface_port_signal_class_changed)
+        self._content_layout.addRow(_sep())
 
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        self._content_layout.addRow(sep)
-
-        # Direction (read-only)
-        direction_label = QLabel(interface_port.direction.value)
+        dir_lbl = QLabel(interface_port.direction.value)
         if interface_port.direction == InterfaceDirection.INPUT:
-            direction_label.setStyleSheet("color: #27ae60;")
+            dir_lbl.setStyleSheet("color: #27ae60;")
         else:
-            direction_label.setStyleSheet("color: #e67e22;")
-        self._content_layout.addRow("Direction:", direction_label)
+            dir_lbl.setStyleSheet("color: #e67e22;")
+        self._content_layout.addRow("Direction:", dir_lbl)
 
         if interface_port.position:
-            pos_label = QLabel(f"({interface_port.position[0]}, {interface_port.position[1]})")
-            pos_label.setStyleSheet("color: #888;")
-            self._content_layout.addRow("Position:", pos_label)
+            pos_lbl = QLabel(
+                f"({interface_port.position[0]}, {interface_port.position[1]})"
+            )
+            pos_lbl.setStyleSheet("color: #888;")
+            self._content_layout.addRow("Position:", pos_lbl)
 
-        id_label = QLabel(str(interface_port.id)[:8])
-        id_label.setStyleSheet("color: #888; font-family: monospace;")
-        self._content_layout.addRow("ID:", id_label)
+        id_lbl = QLabel(str(interface_port.id)[:8])
+        id_lbl.setStyleSheet("color: #888; font-family: monospace;")
+        self._content_layout.addRow("ID:", id_lbl)
 
     def _canonical_type_for_class(self, signal_class: PortSignalClass) -> str:
-        """Return the fixed data_type string for unambiguous signal classes."""
         match signal_class:
             case PortSignalClass.CLOCK | PortSignalClass.RESET:
                 return SignalKind.STD_LOGIC.value
             case PortSignalClass.CONTROL:
-                return SignalKind.STD_LOGIC.value  # default; user can switch to slv
+                return SignalKind.STD_LOGIC.value
             case _:
                 return SignalKind.UFIXED.value
 
@@ -570,18 +551,18 @@ class PropertyEditor(QWidget):
         signal_class: PortSignalClass,
         current_type: str,
     ) -> None:
-        """Replace the Signal Type row(s) with appropriate widgets for signal_class.
-
-        Clock/reset/control → read-only label (type is fixed or auto-selected).
-        Data → editable combo (sfixed/ufixed) + Width/LSB spinboxes + Format label.
-        """
-        # Remove any existing type-related rows (in reverse order to preserve indices)
-        for key in ("interface_port_format", "interface_port_lsb",
-                    "interface_port_width", "interface_port_type"):
+        for key in (
+            "interface_port_format",
+            "interface_port_lsb",
+            "interface_port_width",
+            "interface_port_type",
+        ):
             old_w = self._property_widgets.pop(key, None)
             if old_w is not None:
                 for i in range(self._content_layout.rowCount()):
-                    field = self._content_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+                    field = self._content_layout.itemAt(
+                        i, QFormLayout.ItemRole.FieldRole
+                    )
                     if field and field.widget() is old_w:
                         self._content_layout.removeRow(i)
                         break
@@ -590,16 +571,13 @@ class PropertyEditor(QWidget):
         is_data = signal_class == PortSignalClass.DATA
 
         if is_data:
-            # Determine current width/lsb from signal_type (if already set)
             iport = self._current_interface_port
             if iport is not None and iport.signal_type is not None:
                 init_width = _int_or(iport.signal_type.width, 16)
-                init_lsb   = _int_or(iport.signal_type.lsb, -8)
+                init_lsb   = _int_or(iport.signal_type.lsb,  -8)
             else:
-                init_width = 16
-                init_lsb   = -8
+                init_width, init_lsb = 16, -8
 
-            # Kind combo: sfixed / ufixed
             type_combo = QComboBox()
             type_combo.addItems(self._data_data_types)
             kind_to_use = current_type if current_type in allowed else self._data_data_types[0]
@@ -612,13 +590,11 @@ class PropertyEditor(QWidget):
             self._content_layout.insertRow(2, "Signal Type:", type_combo)
             self._property_widgets["interface_port_type"] = type_combo
 
-            # Format label (derived, read-only)
             format_lbl = QLabel()
             format_lbl.setStyleSheet("color: #89dceb; font-family: monospace;")
             self._content_layout.insertRow(3, "Format:", format_lbl)
             self._property_widgets["interface_port_format"] = format_lbl
 
-            # Width spinbox
             width_spin = QSpinBox()
             width_spin.setRange(1, 256)
             width_spin.setValue(init_width)
@@ -626,7 +602,6 @@ class PropertyEditor(QWidget):
             self._content_layout.insertRow(4, "Width (bits):", width_spin)
             self._property_widgets["interface_port_width"] = width_spin
 
-            # LSB spinbox (negative = fractional bits)
             lsb_spin = QSpinBox()
             lsb_spin.setRange(-256, 0)
             lsb_spin.setValue(init_lsb)
@@ -635,21 +610,22 @@ class PropertyEditor(QWidget):
             self._content_layout.insertRow(5, "LSB:", lsb_spin)
             self._property_widgets["interface_port_lsb"] = lsb_spin
 
-            # Initialise signal_type on model and update label
             self._sync_interface_port_signal_type()
             self._update_interface_format_label()
         else:
-            # Fixed, read-only label
             canonical = self._canonical_type_for_class(signal_class)
-            type_label = QLabel(canonical)
-            type_label.setStyleSheet("color: #888;")
-            if self._current_interface_port and self._current_interface_port.data_type != canonical:
+            type_lbl = QLabel(canonical)
+            type_lbl.setStyleSheet("color: #888;")
+            if (
+                self._current_interface_port
+                and self._current_interface_port.data_type != canonical
+            ):
                 self._current_interface_port.data_type = canonical
                 self.interface_port_changed.emit(
                     self._current_interface_port.id, "data_type", canonical
                 )
-            self._content_layout.insertRow(2, "Signal Type:", type_label)
-            self._property_widgets["interface_port_type"] = type_label
+            self._content_layout.insertRow(2, "Signal Type:", type_lbl)
+            self._property_widgets["interface_port_type"] = type_lbl
 
     def _on_interface_port_name_changed(self, name: str) -> None:
         if self._current_interface_port:
@@ -668,25 +644,24 @@ class PropertyEditor(QWidget):
                 self.interface_port_changed.emit(
                     self._current_interface_port.id, "data_type", new_type
                 )
-        # Keep signal_type.kind in sync and refresh format label
         self._sync_interface_port_signal_type()
         self._update_interface_format_label()
 
     def _on_interface_port_fp_changed(self) -> None:
-        """Handle Width or LSB spinbox change for a DATA interface port."""
         self._sync_interface_port_signal_type()
         self._update_interface_format_label()
 
     def _sync_interface_port_signal_type(self) -> None:
-        """Rebuild interface_port.signal_type from current kind/width/lsb widgets."""
         if not self._current_interface_port:
             return
         kind_w  = self._property_widgets.get("interface_port_type")
         width_w = self._property_widgets.get("interface_port_width")
         lsb_w   = self._property_widgets.get("interface_port_lsb")
-        if not (isinstance(kind_w, QComboBox)
-                and isinstance(width_w, QSpinBox)
-                and isinstance(lsb_w, QSpinBox)):
+        if not (
+            isinstance(kind_w, QComboBox)
+            and isinstance(width_w, QSpinBox)
+            and isinstance(lsb_w, QSpinBox)
+        ):
             return
         st = SignalType(
             kind=kind_w.currentText(),
@@ -699,25 +674,26 @@ class PropertyEditor(QWidget):
         )
 
     def _update_interface_format_label(self) -> None:
-        """Recompute and display the FP format notation for a DATA interface port."""
         lbl = self._property_widgets.get("interface_port_format")
         if not isinstance(lbl, QLabel):
             return
         kind_w  = self._property_widgets.get("interface_port_type")
         width_w = self._property_widgets.get("interface_port_width")
         lsb_w   = self._property_widgets.get("interface_port_lsb")
-        if not (isinstance(kind_w, QComboBox)
-                and isinstance(width_w, QSpinBox)
-                and isinstance(lsb_w, QSpinBox)):
+        if not (
+            isinstance(kind_w, QComboBox)
+            and isinstance(width_w, QSpinBox)
+            and isinstance(lsb_w, QSpinBox)
+        ):
             lbl.setText("")
             return
-        st = SignalType(
+        st       = SignalType(
             kind=kind_w.currentText(),
             width=str(width_w.value()),
             lsb=str(lsb_w.value()),
         )
         notation = st.notation()
-        vhdl = st.to_vhdl_type()
+        vhdl     = st.to_vhdl_type()
         lbl.setText(f"{notation}  ·  {vhdl}" if notation else vhdl)
 
     def _on_interface_port_signal_class_changed(self, value: str) -> None:
@@ -733,22 +709,14 @@ class PropertyEditor(QWidget):
         self.interface_port_changed.emit(
             self._current_interface_port.id, "signal_class", new_sc
         )
-        # Rebuild type widget for the new class (auto-corrects data_type if needed)
-        current_type = self._current_interface_port.data_type
-        self._rebuild_interface_type_widget(new_sc, current_type)
+        self._rebuild_interface_type_widget(
+            new_sc, self._current_interface_port.data_type
+        )
+
+    # ── Utility ───────────────────────────────────────────────────────────────
 
     def update_position(self, x: float, y: float) -> None:
-        """Update the displayed position (called when component moves)."""
-        if self._current_instance:
-            # Find and update position label
-            for i in range(self._content_layout.rowCount()):
-                label_item = self._content_layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
-                if label_item and label_item.widget():
-                    label_text = label_item.widget().text() if hasattr(label_item.widget(), 'text') else ""
-                    if label_text == "Position:":
-                        field_item = self._content_layout.itemAt(
-                            i, QFormLayout.ItemRole.FieldRole
-                        )
-                        if field_item and field_item.widget():
-                            field_item.widget().setText(f"({x:.0f}, {y:.0f})")
-                        break
+        """Update the position display when the selected component moves."""
+        pos_lbl = self._property_widgets.get("position")
+        if isinstance(pos_lbl, QLabel):
+            pos_lbl.setText(f"({x:.0f}, {y:.0f})")

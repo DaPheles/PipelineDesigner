@@ -24,7 +24,7 @@
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 0,
@@ -38,7 +38,7 @@
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
-                "lsb": "0"
+                "lsb": "LSB"
             },
             "position": [
                 4,
@@ -53,14 +53,9 @@
             "default_value": 8
         },
         {
-            "name": "RESET_TYPE",
-            "data_type": "string",
-            "default_value": "async"
-        },
-        {
-            "name": "RESET_POLARITY",
-            "data_type": "string",
-            "default_value": "high"
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": 0
         }
     ],
     "visual": {
@@ -70,6 +65,6 @@
     },
     "latency": 1,
     "behavior": {
-        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\n# RESET_TYPE (sync|async) and RESET_POLARITY (high|low) control reset behaviour.\nreturn d"
+        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\nreturn d"
     }
 }

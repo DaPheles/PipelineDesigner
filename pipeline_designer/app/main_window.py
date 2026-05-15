@@ -240,7 +240,8 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         """Update the window title and property panel header."""
         title = self._config.window.title
-        design_name = self._scene.get_design().name
+        design = self._scene.get_design()
+        design_name = design.name
 
         if self._current_file:
             title = f"{self._current_file.name} - {title}"
@@ -249,6 +250,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(title)
         self._property_editor.set_design_name(design_name)
+        self._property_editor.set_design(design)
 
     def _on_new(self) -> None:
         """Handle new design action."""
