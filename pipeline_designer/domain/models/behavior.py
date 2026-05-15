@@ -96,16 +96,27 @@ def _eval_index(expr: str, generics: dict[str, int]) -> int:
     return _visit(tree)
 
 
-def _substitute_ints(expr: str, int_generics: dict[str, int]) -> str:
-    """Replace whole-word generic names with their concrete integer values.
+def _substitute_generics(expr: str, generics: dict[str, Any]) -> str:
+    """Substitute generic values into an expression string.
 
-    String-valued generics (outer-scope names forwarded by an instance) are
-    absent from *int_generics* and are therefore left as identifiers so that
-    the enclosing entity's generics remain visible in the emitted expression.
+    Integer/float generics → replaced with their literal value.
+    String generics (expressions referencing outer-scope names, e.g.
+    ``"WIDTH+2"``) → replaced in-place so the result only contains names
+    valid in the enclosing entity's scope.  Substitution is single-pass
+    per generic; outer-scope names that are not themselves keys in *generics*
+    are left as-is.
     """
     result = expr
-    for name, val in int_generics.items():
-        result = re.sub(r"\b" + re.escape(name) + r"\b", str(val), result)
+    for name, val in generics.items():
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, (int, float)):
+            replacement = str(int(val))
+        elif isinstance(val, str):
+            replacement = val
+        else:
+            continue
+        result = re.sub(r"\b" + re.escape(name) + r"\b", replacement, result)
     return result
 
 
@@ -250,11 +261,12 @@ class SignalType(BaseModel):
             msb = w + l - 1
             return f"{k.value}({msb} downto {l})"
         except (ValueError, KeyError):
-            # Partially substitute: numeric generics become literals; string
-            # generics (outer-scope names forwarded by the instance) remain
-            # as identifiers valid in the enclosing entity's scope.
-            w_expr = _substitute_ints(self.width, int_g)
-            l_expr = _substitute_ints(self.lsb,   int_g)
+            # Substitute all generics: numeric ones become literals, string
+            # ones (expressions referencing outer-scope names) are spliced
+            # in-place so the result uses only names valid in the enclosing
+            # entity's scope.
+            w_expr = _substitute_generics(self.width, g)
+            l_expr = _substitute_generics(self.lsb,   g)
             try:
                 msb = int(w_expr) + int(l_expr) - 1
                 return f"{k.value}({msb} downto {l_expr})"

@@ -127,6 +127,7 @@ class StructuralVhdlGenerator:
         self._signals: list[tuple[str, str]] = []
 
         self._build_connectivity()
+        self._check_signal_consistency()
 
     # ── Generic resolution ────────────────────────────────────────────────────
 
@@ -153,6 +154,56 @@ class StructuralVhdlGenerator:
             name: (name if (name in outer and val == outer[name]) else val)
             for name, val in resolved.items()
         }
+
+    # ── Signal consistency ────────────────────────────────────────────────────
+
+    def _endpoint_vhdl_type(self, ep, inst_by_id: dict, iface_by_id: dict) -> str | None:
+        """Return the VHDL type string for one side of a connection, or None."""
+        if ep.is_interface_port():
+            ip = iface_by_id.get(ep.interface_port_id)
+            return ip.effective_signal_type().to_vhdl_type() if ip else None
+        if ep.component_id is not None:
+            inst = inst_by_id.get(ep.component_id)
+            if inst is None:
+                return None
+            defn = self._library.get(inst.definition_ref)
+            if defn is None:
+                return None
+            port = defn.get_port_by_name(ep.port_name)
+            if port is None:
+                return None
+            return port.signal_type.to_vhdl_type(self._effective_generics(inst, defn))
+        return None
+
+    def _endpoint_label(self, ep, inst_by_id: dict, iface_by_id: dict) -> str:
+        if ep.is_interface_port():
+            ip = iface_by_id.get(ep.interface_port_id)
+            return ip.name if ip else "?"
+        if ep.component_id is not None:
+            inst = inst_by_id.get(ep.component_id)
+            name = inst.get_display_name() if inst else str(ep.component_id)[:8]
+            return f"{name}.{ep.port_name}"
+        return "?"
+
+    def _check_signal_consistency(self) -> None:
+        """Warn on connections where source and target port types differ."""
+        inst_by_id  = {c.id: c for c in self._design.components}
+        iface_by_id = {p.id: p for p in self._design.interface_ports}
+
+        for conn in self._design.connections:
+            src_type = self._endpoint_vhdl_type(conn.source, inst_by_id, iface_by_id)
+            tgt_type = self._endpoint_vhdl_type(conn.target, inst_by_id, iface_by_id)
+
+            if src_type is None or tgt_type is None:
+                continue
+            if src_type == tgt_type:
+                continue
+
+            src_label = self._endpoint_label(conn.source, inst_by_id, iface_by_id)
+            tgt_label = self._endpoint_label(conn.target, inst_by_id, iface_by_id)
+            self._warnings.append(
+                f"Type mismatch: {src_label} ({src_type}) → {tgt_label} ({tgt_type})"
+            )
 
     # ── Public API ────────────────────────────────────────────────────────────
 
