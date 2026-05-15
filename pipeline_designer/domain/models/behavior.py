@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import operator
+import re
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -93,6 +94,19 @@ def _eval_index(expr: str, generics: dict[str, int]) -> int:
         )
 
     return _visit(tree)
+
+
+def _substitute_ints(expr: str, int_generics: dict[str, int]) -> str:
+    """Replace whole-word generic names with their concrete integer values.
+
+    String-valued generics (outer-scope names forwarded by an instance) are
+    absent from *int_generics* and are therefore left as identifiers so that
+    the enclosing entity's generics remain visible in the emitted expression.
+    """
+    result = expr
+    for name, val in int_generics.items():
+        result = re.sub(r"\b" + re.escape(name) + r"\b", str(val), result)
+    return result
 
 
 # ── Signal kind ───────────────────────────────────────────────────────────────
@@ -236,7 +250,20 @@ class SignalType(BaseModel):
             msb = w + l - 1
             return f"{k.value}({msb} downto {l})"
         except (ValueError, KeyError):
-            return f"{k.value}({self.msb_expr()} downto {self.lsb})"
+            # Partially substitute: numeric generics become literals; string
+            # generics (outer-scope names forwarded by the instance) remain
+            # as identifiers valid in the enclosing entity's scope.
+            w_expr = _substitute_ints(self.width, int_g)
+            l_expr = _substitute_ints(self.lsb,   int_g)
+            try:
+                msb = int(w_expr) + int(l_expr) - 1
+                return f"{k.value}({msb} downto {l_expr})"
+            except ValueError:
+                msb_expr = (
+                    f"({w_expr})-1" if l_expr == "0"
+                    else f"({w_expr})+({l_expr})-1"
+                )
+                return f"{k.value}({msb_expr} downto {l_expr})"
 
     def to_python_annotation(self, generics: dict[str, Any] | None = None) -> str:
         """Return a pseudo-code type annotation for the behavior signature."""

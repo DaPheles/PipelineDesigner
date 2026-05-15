@@ -128,6 +128,32 @@ class StructuralVhdlGenerator:
 
         self._build_connectivity()
 
+    # ── Generic resolution ────────────────────────────────────────────────────
+
+    def _effective_generics(
+        self,
+        instance: ComponentInstance,
+        definition: ComponentDefinition,
+    ) -> dict[str, Any]:
+        """Resolve generics, forwarding outer design generic names where the
+        instance value matches the design's outer generic default for the same name.
+
+        A component generic named ``LSB`` whose resolved value equals the design's
+        ``LSB`` default is emitted as the identifier ``LSB`` rather than the literal
+        ``-15``, making the generated signal types and generic maps parameterizable
+        by the enclosing entity's generics.
+        """
+        resolved = _resolve_generics(instance, definition)
+        outer = {
+            g.name: g.default_value
+            for g in self._design.component_config.generics
+            if g.default_value is not None
+        }
+        return {
+            name: (name if (name in outer and val == outer[name]) else val)
+            for name, val in resolved.items()
+        }
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     @property
@@ -221,7 +247,7 @@ class StructuralVhdlGenerator:
                 f"Port '{port_name}' not found on '{inst.definition_ref}'"
             )
             return "std_logic"
-        return port.signal_type.to_vhdl_type(_resolve_generics(inst, defn))
+        return port.signal_type.to_vhdl_type(self._effective_generics(inst, defn))
 
     # ── Library clause ────────────────────────────────────────────────────────
 
@@ -375,7 +401,7 @@ class StructuralVhdlGenerator:
 
             inst_name = _vhdl_ident(inst.get_display_name())
             comp_name = _vhdl_ident(defn.name)
-            generics  = _resolve_generics(inst, defn)
+            generics  = self._effective_generics(inst, defn)
 
             b = [f"  {inst_name} : {comp_name}"]
 
