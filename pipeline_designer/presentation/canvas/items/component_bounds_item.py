@@ -107,8 +107,8 @@ class ComponentBoundsItem(QGraphicsRectItem):
         """
         if not component_rects:
             # Default bounds if no components - reasonable vertical span
-            top_y = -50
-            bottom_y = 150
+            top_y = -80
+            bottom_y = 80
         else:
             top_y = min(r.top() for r in component_rects)
             bottom_y = max(r.bottom() for r in component_rects)
