@@ -314,10 +314,12 @@ class InterfacePortDisplayTable(QWidget):
         self._up_btn = QPushButton("▲")
         self._up_btn.setFixedWidth(28)
         self._up_btn.setToolTip("Move selected port up")
+        self._up_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._up_btn.clicked.connect(self._move_up)
         self._down_btn = QPushButton("▼")
         self._down_btn.setFixedWidth(28)
         self._down_btn.setToolTip("Move selected port down")
+        self._down_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._down_btn.clicked.connect(self._move_down)
         btn_row.addWidget(self._up_btn)
         btn_row.addWidget(self._down_btn)
@@ -505,20 +507,24 @@ class InterfacePortDisplayTable(QWidget):
 
     def _move_up(self) -> None:
         row = self._table.currentRow()
+        col = max(self._table.currentColumn(), 0)
         if row <= 0 or not self._iports:
             return
         self._iports[row - 1], self._iports[row] = self._iports[row], self._iports[row - 1]
         self._rebuild_table()
-        self._table.setCurrentCell(row - 1, self._table.currentColumn())
+        self._table.setCurrentCell(row - 1, col)
+        self._table.setFocus()
         self.port_reordered.emit([p.id for p in self._iports])
 
     def _move_down(self) -> None:
         row = self._table.currentRow()
+        col = max(self._table.currentColumn(), 0)
         if row < 0 or row >= len(self._iports) - 1:
             return
         self._iports[row], self._iports[row + 1] = self._iports[row + 1], self._iports[row]
         self._rebuild_table()
-        self._table.setCurrentCell(row + 1, self._table.currentColumn())
+        self._table.setCurrentCell(row + 1, col)
+        self._table.setFocus()
         self.port_reordered.emit([p.id for p in self._iports])
 
     # ── Private ───────────────────────────────────────────────────────────────
