@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
-    QDoubleSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -38,16 +36,10 @@ from pipeline_designer.domain.models.signal_constraints import (
 )
 from pipeline_designer.presentation.panels.component_tables import (
     InstanceGenericTable,
+    InterfacePortDisplayTable,
     PortInfoTable,
 )
 from pipeline_designer.presentation.primitive_editor.generic_table import GenericTable
-
-
-def _int_or(s: str, default: int) -> int:
-    try:
-        return int(s)
-    except (ValueError, TypeError):
-        return default
 
 
 def _sep() -> QFrame:
@@ -177,10 +169,11 @@ class PropertyEditor(QWidget):
         self._design_name_label.setText(name)
 
     def set_design(self, design: Design) -> None:
-        """Call whenever a new design is loaded or created.
+        """Call whenever a new design is loaded or its port list changes.
 
         Updates the design reference and refreshes the panel if no item is
-        currently selected (so the design-level generics stay current).
+        currently selected (so the design-level generics and port table stay
+        current after canvas-side port additions or removals).
         """
         self._current_design = design
         if (self._current_instance is None
@@ -192,35 +185,61 @@ class PropertyEditor(QWidget):
     # ── Design-level generics view (no-selection state) ───────────────────────
 
     def _show_design_generics(self) -> None:
-        """Show design entity generics when nothing is selected."""
+        """Show design entity generics and interface ports when nothing is selected."""
         self._clear_content()
         self._title_label.setText("Design Properties")
 
         if self._current_design is None:
             return
 
-        info_lbl = QLabel(
-            "Define VHDL entity generics for export.  "
-            "Instance generic values may reference these by name."
+        # ── Entity generics ───────────────────────────────────────────────
+        self._content_layout.addRow(_section_label("Entity Generics"))
+        gen_info = QLabel(
+            "VHDL entity generics for export.  "
+            "Instance values may reference these by name."
         )
-        info_lbl.setWordWrap(True)
-        info_lbl.setStyleSheet("color: #888; font-size: 9pt;")
-        self._content_layout.addRow(info_lbl)
+        gen_info.setWordWrap(True)
+        gen_info.setStyleSheet("color: #888; font-size: 9pt;")
+        self._content_layout.addRow(gen_info)
 
-        self._design_generic_table = GenericTable()
-        self._design_generic_table.set_generics(
-            self._current_design.component_config.generics
+        gen_table = GenericTable()
+        gen_table.set_generics(self._current_design.component_config.generics)
+        gen_table.data_changed.connect(self._on_design_generics_changed)
+        self._content_layout.addRow(gen_table)
+        self._property_widgets["design_generics"] = gen_table
+
+        # ── Interface ports ───────────────────────────────────────────────
+        self._content_layout.addRow(_sep())
+        self._content_layout.addRow(_section_label("Interface Ports"))
+        port_info = QLabel(
+            "Click a port on the canvas to edit its properties.\n"
+            "Width and LSB accept numbers or design-generic names (e.g. WIDTH)."
         )
-        self._design_generic_table.data_changed.connect(
-            self._on_design_generics_changed
+        port_info.setWordWrap(True)
+        port_info.setStyleSheet("color: #888; font-size: 9pt;")
+        self._content_layout.addRow(port_info)
+
+        iport_table = InterfacePortDisplayTable()
+        iport_table.set_interface_ports(self._current_design.interface_ports)
+        iport_table.port_changed.connect(
+            lambda pid, field, val: self.interface_port_changed.emit(pid, field, val)
         )
-        self._content_layout.addRow(self._design_generic_table)
-        self._property_widgets["design_generics"] = self._design_generic_table
+        iport_table.port_reordered.connect(self._on_interface_ports_reordered)
+        self._content_layout.addRow(iport_table)
+        self._property_widgets["design_ports"] = iport_table
 
     def _on_design_generics_changed(self) -> None:
         tbl = self._property_widgets.get("design_generics")
         if isinstance(tbl, GenericTable) and self._current_design is not None:
             self._current_design.component_config.generics = tbl.get_generics()
+
+    def _on_interface_ports_reordered(self, new_order: list) -> None:
+        if self._current_design is None:
+            return
+        port_map = {p.id: p for p in self._current_design.interface_ports}
+        self._current_design.interface_ports = [
+            port_map[uid] for uid in new_order if uid in port_map
+        ]
 
     # ── Component view ────────────────────────────────────────────────────────
 
@@ -573,10 +592,10 @@ class PropertyEditor(QWidget):
         if is_data:
             iport = self._current_interface_port
             if iport is not None and iport.signal_type is not None:
-                init_width = _int_or(iport.signal_type.width, 16)
-                init_lsb   = _int_or(iport.signal_type.lsb,  -8)
+                init_width_str = iport.signal_type.width
+                init_lsb_str   = iport.signal_type.lsb
             else:
-                init_width, init_lsb = 16, -8
+                init_width_str, init_lsb_str = "16", "-8"
 
             type_combo = QComboBox()
             type_combo.addItems(self._data_data_types)
@@ -595,20 +614,21 @@ class PropertyEditor(QWidget):
             self._content_layout.insertRow(3, "Format:", format_lbl)
             self._property_widgets["interface_port_format"] = format_lbl
 
-            width_spin = QSpinBox()
-            width_spin.setRange(1, 256)
-            width_spin.setValue(init_width)
-            width_spin.valueChanged.connect(self._on_interface_port_fp_changed)
-            self._content_layout.insertRow(4, "Width (bits):", width_spin)
-            self._property_widgets["interface_port_width"] = width_spin
+            # QLineEdit allows both numeric literals and generic-name references
+            width_edit = QLineEdit()
+            width_edit.setPlaceholderText("e.g. 16 or WIDTH")
+            width_edit.setText(init_width_str)
+            width_edit.textChanged.connect(self._on_interface_port_fp_changed)
+            self._content_layout.insertRow(4, "Width (bits):", width_edit)
+            self._property_widgets["interface_port_width"] = width_edit
 
-            lsb_spin = QSpinBox()
-            lsb_spin.setRange(-256, 0)
-            lsb_spin.setValue(init_lsb)
-            lsb_spin.setToolTip("LSB position: 0 = integer, negative = fractional bits")
-            lsb_spin.valueChanged.connect(self._on_interface_port_fp_changed)
-            self._content_layout.insertRow(5, "LSB:", lsb_spin)
-            self._property_widgets["interface_port_lsb"] = lsb_spin
+            lsb_edit = QLineEdit()
+            lsb_edit.setPlaceholderText("e.g. -8 or -FRAC_BITS")
+            lsb_edit.setText(init_lsb_str)
+            lsb_edit.setToolTip("LSB position: 0 = integer, negative = fractional bits")
+            lsb_edit.textChanged.connect(self._on_interface_port_fp_changed)
+            self._content_layout.insertRow(5, "LSB:", lsb_edit)
+            self._property_widgets["interface_port_lsb"] = lsb_edit
 
             self._sync_interface_port_signal_type()
             self._update_interface_format_label()
@@ -659,14 +679,14 @@ class PropertyEditor(QWidget):
         lsb_w   = self._property_widgets.get("interface_port_lsb")
         if not (
             isinstance(kind_w, QComboBox)
-            and isinstance(width_w, QSpinBox)
-            and isinstance(lsb_w, QSpinBox)
+            and isinstance(width_w, QLineEdit)
+            and isinstance(lsb_w, QLineEdit)
         ):
             return
         st = SignalType(
             kind=kind_w.currentText(),
-            width=str(width_w.value()),
-            lsb=str(lsb_w.value()),
+            width=width_w.text() or "1",
+            lsb=lsb_w.text() or "0",
         )
         self._current_interface_port.signal_type = st
         self.interface_port_changed.emit(
@@ -682,15 +702,15 @@ class PropertyEditor(QWidget):
         lsb_w   = self._property_widgets.get("interface_port_lsb")
         if not (
             isinstance(kind_w, QComboBox)
-            and isinstance(width_w, QSpinBox)
-            and isinstance(lsb_w, QSpinBox)
+            and isinstance(width_w, QLineEdit)
+            and isinstance(lsb_w, QLineEdit)
         ):
             lbl.setText("")
             return
         st       = SignalType(
             kind=kind_w.currentText(),
-            width=str(width_w.value()),
-            lsb=str(lsb_w.value()),
+            width=width_w.text() or "1",
+            lsb=lsb_w.text() or "0",
         )
         notation = st.notation()
         vhdl     = st.to_vhdl_type()
