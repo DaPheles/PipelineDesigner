@@ -118,6 +118,49 @@ class DesignSimulationPanel(QWidget):
         self._waveform.set_data([], 0)
         self.mark_dirty()
 
+    def get_sim_config(self) -> dict:
+        """Return serialisable simulation configuration (cycles, mode, stimuli)."""
+        stimuli: dict[str, list[str]] = {}
+        for row in range(self._in_table.rowCount()):
+            h = self._in_table.verticalHeaderItem(row)
+            if h:
+                port_name = h.text().split(" (")[0]
+                stimuli[port_name] = [
+                    (self._in_table.item(row, c).text().strip()
+                     if self._in_table.item(row, c) else "0")
+                    for c in range(self._in_table.columnCount())
+                ]
+        return {"n_cycles": self._n_cycles, "mode": self._mode.value, "stimuli": stimuli}
+
+    def apply_sim_config(self, n_cycles: int, mode: str, stimuli: dict[str, list[str]]) -> None:
+        """Restore simulation configuration; must be called after refresh_ports()."""
+        self._cycle_spin.setValue(n_cycles)  # triggers _on_cycles_changed → column rebuild
+
+        try:
+            target = SimMode(mode)
+        except ValueError:
+            target = SimMode.FLOAT
+        btn = self._mode_buttons.get(target)
+        if btn:
+            btn.setChecked(True)
+
+        if not stimuli:
+            return
+        self._in_table.blockSignals(True)
+        for row in range(self._in_table.rowCount()):
+            h = self._in_table.verticalHeaderItem(row)
+            if not h:
+                continue
+            port_name = h.text().split(" (")[0]
+            values = stimuli.get(port_name, [])
+            for c in range(self._in_table.columnCount()):
+                val = values[c] if c < len(values) else "0"
+                item = QTableWidgetItem(val)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._in_table.setItem(row, c, item)
+        self._in_table.blockSignals(False)
+        self._validate_all_cells()
+
     # ------------------------------------------------------------------
     # UI construction
 
@@ -160,6 +203,7 @@ class DesignSimulationPanel(QWidget):
         mode_bar = QHBoxLayout()
         mode_bar.addWidget(QLabel("Mode:"))
         self._mode_group = QButtonGroup(self)
+        self._mode_buttons: dict[SimMode, QRadioButton] = {}
         for label, mode in (
             ("Float (ideal)", SimMode.FLOAT),
             ("Fixed-point", SimMode.FIXED),
@@ -169,6 +213,7 @@ class DesignSimulationPanel(QWidget):
             rb.setChecked(mode == self._mode)
             rb.toggled.connect(lambda checked, m=mode: self._on_mode_toggled(checked, m))
             self._mode_group.addButton(rb)
+            self._mode_buttons[mode] = rb
             mode_bar.addWidget(rb)
         mode_bar.addStretch()
         root.addLayout(mode_bar)

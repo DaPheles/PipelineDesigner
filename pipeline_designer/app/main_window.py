@@ -584,6 +584,10 @@ class MainWindow(QMainWindow):
             if path.exists():
                 self._load_from_file(path)
 
+        # Restore simulation config after refresh_ports() has been called.
+        sim = self._config.simulation
+        self._sim_panel.apply_sim_config(sim.n_cycles, sim.mode, sim.stimuli)
+
         # Restore canvas view after design is loaded so the scene rect is valid.
         if self._config.view_zoom != 1.0 or self._config.view_scroll_x or self._config.view_scroll_y:
             self._view.restore_view_state(
@@ -606,6 +610,9 @@ class MainWindow(QMainWindow):
         self._config.panel_properties  = not self._property_dock.isHidden()
         self._config.panel_simulation   = not self._sim_dock.isHidden()
         self._config.panel_vhdl_export  = not self._vhdl_dock.isHidden()
+        cfg = self._sim_panel.get_sim_config()
+        from .config import SimulationConfig
+        self._config.simulation = SimulationConfig(**cfg)
         self._config.save()
         super().closeEvent(event)
 

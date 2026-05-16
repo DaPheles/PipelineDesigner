@@ -11,6 +11,16 @@ from pipeline_designer.domain import DEFAULT_GRID, GridConfig
 log = logging.getLogger(__name__)
 
 
+class SimulationConfig(BaseModel):
+    """Saved state of the simulation panel."""
+
+    n_cycles: int = Field(default=8, description="Number of simulation cycles")
+    mode: str = Field(default="float", description="Simulation mode: float, fixed, cosim")
+    stimuli: dict[str, list[str]] = Field(
+        default_factory=dict, description="Per-port stimulus values keyed by port name"
+    )
+
+
 class WindowConfig(BaseModel):
     """Window configuration settings."""
 
@@ -66,6 +76,10 @@ class AppConfig(BaseModel):
     view_zoom: float = Field(default=1.0, description="Canvas zoom factor")
     view_scroll_x: float = Field(default=0.0, description="Canvas viewport centre X in scene coordinates")
     view_scroll_y: float = Field(default=0.0, description="Canvas viewport centre Y in scene coordinates")
+
+    simulation: SimulationConfig = Field(
+        default_factory=SimulationConfig, description="Simulation panel configuration"
+    )
 
     # Tools panel open/closed states
     panel_properties: bool = Field(default=True, description="Properties panel open")
