@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Library reloaded")
 
     def _restore_session(self) -> None:
-        """Restore window geometry, dock layout, and last open file from config."""
+        """Restore window geometry, dock layout, last open file, and canvas view from config."""
         geom = self._config.decode_geometry()
         if geom is not None:
             self.restoreGeometry(geom)
@@ -578,11 +578,23 @@ class MainWindow(QMainWindow):
             if path.exists():
                 self._load_from_file(path)
 
+        # Restore canvas view after design is loaded so the scene rect is valid.
+        if self._config.view_zoom != 1.0 or self._config.view_scroll_x or self._config.view_scroll_y:
+            self._view.restore_view_state(
+                self._config.view_zoom,
+                self._config.view_scroll_x,
+                self._config.view_scroll_y,
+            )
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """Save session state to config.json before closing."""
         self._config.encode_geometry(self.saveGeometry())
         self._config.encode_state(self.saveState())
         self._config.last_file = self._current_file
+        self._config.view_zoom = self._view.get_zoom_factor()
+        scroll_x, scroll_y = self._view.get_scroll_offset()
+        self._config.view_scroll_x = scroll_x
+        self._config.view_scroll_y = scroll_y
         self._config.save()
         super().closeEvent(event)
 

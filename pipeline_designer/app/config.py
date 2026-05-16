@@ -63,6 +63,9 @@ class AppConfig(BaseModel):
     session_state: str | None = Field(
         default=None, description="Dock/toolbar layout (base64-encoded QByteArray)"
     )
+    view_zoom: float = Field(default=1.0, description="Canvas zoom factor")
+    view_scroll_x: int = Field(default=0, description="Canvas horizontal scroll position")
+    view_scroll_y: int = Field(default=0, description="Canvas vertical scroll position")
 
     def add_recent_file(self, path: Path) -> None:
         """Add a file to the recent files list."""

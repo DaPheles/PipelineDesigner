@@ -186,6 +186,22 @@ class DesignView(QGraphicsView):
         """Get the current zoom factor."""
         return self._zoom_factor
 
+    def get_scroll_offset(self) -> tuple[int, int]:
+        """Return current (horizontal, vertical) scrollbar positions."""
+        return (
+            self.horizontalScrollBar().value(),
+            self.verticalScrollBar().value(),
+        )
+
+    def restore_view_state(self, zoom: float, scroll_x: int, scroll_y: int) -> None:
+        """Apply a saved zoom level and scroll position."""
+        self.resetTransform()
+        self.scale(zoom, zoom)
+        self._zoom_factor = zoom
+        self.zoom_changed.emit(zoom)
+        self.horizontalScrollBar().setValue(scroll_x)
+        self.verticalScrollBar().setValue(scroll_y)
+
     def dragEnterEvent(self, event) -> None:
         """Handle drag enter for component drops."""
         if event.mimeData().hasText():
