@@ -48,24 +48,8 @@ from fixedpoint import FPFormat, FixedPointArray, UnquantizedResult
 
 
 # ── Namespace factories ──────────────────────────────────────────────────────
-
-def _sfixed(msb: int, lsb: int) -> FPFormat:
-    """sfixed(msb downto lsb) → FPFormat with signed=True."""
-    int_bits  = msb + 1
-    frac_bits = -lsb
-    if frac_bits < 0:
-        raise ValueError(f"SFixed({msb}, {lsb}): lsb must be ≤ 0")
-    return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=True)
-
-
-def _ufixed(msb: int, lsb: int) -> FPFormat:
-    """ufixed(msb downto lsb) → FPFormat with signed=False."""
-    int_bits  = msb + 1
-    frac_bits = -lsb
-    if frac_bits < 0:
-        raise ValueError(f"UFixed({msb}, {lsb}): lsb must be ≤ 0")
-    return FPFormat(int_bits=int_bits, frac_bits=frac_bits, signed=False)
-
+# FPFormat.from_sfixed / from_ufixed already validate lsb ≤ 0, so no wrappers
+# needed.  _bits and _const are thin helpers that do not exist on FPFormat.
 
 def _bits(n: int) -> FPFormat:
     """std_logic_vector(n-1 downto 0) — treated as n-bit unsigned integer."""
@@ -83,15 +67,14 @@ class SimNamespace(dict):
     def __init__(self, extra: dict[str, Any] | None = None):
         super().__init__()
         self.update({
-            # type constructors (new names)
-            "Signed":  _sfixed,
-            "Unsigned": _ufixed,
-            "Bits":    _bits,
-            "Const":   _const,
-            # legacy aliases for backward compatibility with existing behavior code
-            "SFixed":  _sfixed,
-            "UFixed":  _ufixed,
-            # raw types (useful for isinstance checks in behavior code)
+            # fixed-point format constructors (VHDL sfixed/ufixed index convention)
+            "SFixed":   FPFormat.from_sfixed,
+            "UFixed":   FPFormat.from_ufixed,
+            "Signed":   FPFormat.from_sfixed,   # more explicit alias
+            "Unsigned": FPFormat.from_ufixed,
+            "Bits":     _bits,
+            "Const":    _const,
+            # raw types — useful for isinstance checks in behavior code
             "FPFormat":          FPFormat,
             "FixedPointArray":   FixedPointArray,
             "UnquantizedResult": UnquantizedResult,

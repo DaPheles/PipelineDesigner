@@ -40,6 +40,7 @@ from uuid import UUID
 
 import numpy as np
 
+from fixedpoint import FixedPointArray, UnquantizedResult
 from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection
@@ -266,8 +267,7 @@ class DesignSimulator:
             if not port.signal_type.has_range(generics):
                 continue
             try:
-                fmt = port.signal_type.to_fpformat(generics)
-                return fmt.quantize(np.array(0.0))
+                return port.signal_type.to_fpformat(generics).zero()
             except Exception:
                 continue
 
@@ -441,13 +441,10 @@ class DesignSimulator:
             fmt = port_obj.signal_type.to_fpformat(self._inst_generics[inst_id])
         except Exception:
             return val
-        # UnquantizedResult from FixedPointArray arithmetic (e.g. a + b, a * b)
-        if hasattr(val, 'quantize') and hasattr(val, 'keep_full'):
+        if isinstance(val, UnquantizedResult):
             return val.quantize(fmt)
-        # FixedPointArray: re-quantize to the declared output format
-        if hasattr(val, 'requantize') and hasattr(val, 'fmt'):
+        if isinstance(val, FixedPointArray):
             return val.requantize(fmt)
-        # Plain Python / numpy scalar
         if isinstance(val, (int, float, np.floating, np.integer)):
             return fmt.quantize(np.array(float(val)))
         return val

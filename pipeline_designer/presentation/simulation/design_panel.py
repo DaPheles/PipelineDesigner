@@ -514,42 +514,32 @@ class DesignSimulationPanel(QWidget):
 
     @staticmethod
     def _quantize_input(value: Any | None, port: InterfacePort) -> Any | None:
-        """Pre-quantize *value* to the nearest representable float for the port's format.
+        """Pre-quantize *value* to the nearest representable plain float for the port.
 
-        Returns a plain Python float rounded to the port's fixed-point precision.
-        Using plain floats (not FixedPointArray) keeps arithmetic behavior codes
-        (e.g. ``return a + b``) working without producing UnquantizedResult objects.
+        Returns a plain Python float rounded to the port's fixed-point precision so
+        that arithmetic behavior codes (e.g. ``return a + b``) work without producing
+        UnquantizedResult objects.
         """
         if value is None:
             return None
         st = port.effective_signal_type()
-        k = st.resolved_kind()
-        if k not in _FIXED_POINT_KINDS:
-            return value  # not a fixed-point type, pass through as-is
+        if st.resolved_kind() not in _FIXED_POINT_KINDS:
+            return value
         try:
-            fmt = st.to_fpformat()
-            fp = fmt.quantize(np.array(float(value)))
-            return float(fp.values)
+            return float(st.to_fpformat().quantize(np.array(float(value))))
         except Exception:
             return value
 
     @staticmethod
     def _extract_value(result: Any) -> Any | None:
+        """Convert any executor result to a plain Python scalar (float/bool/int)."""
         if result is None:
             return None
-        # FixedPointArray: extract float via .values (numpy array of real values)
-        if hasattr(result, "values") and not hasattr(result, "item"):
-            try:
-                return float(np.asarray(result.values).flat[0])
-            except Exception:
-                pass
+        if isinstance(result, bool):
+            return result
         try:
-            if hasattr(result, "item"):
-                return float(result.item())
-            if isinstance(result, (bool, int, float)):
-                return result
             return float(result)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _show_error(self, msg: str) -> None:

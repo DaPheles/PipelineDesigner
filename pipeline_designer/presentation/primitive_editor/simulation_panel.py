@@ -17,9 +17,9 @@ Generic types (``signal_kind``) must be set concretely in the
 
 from __future__ import annotations
 
-import math
 from typing import Any, Callable
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline_designer.domain.models import Generic, Port, PortDirection, PortSignalClass
-from pipeline_designer.domain.models.behavior import SignalKind, _eval_index
+from pipeline_designer.domain.models.behavior import SignalKind
 from pipeline_designer.domain.simulation.executor import BehaviorExecutor
 from pipeline_designer.presentation.shared.waveform import (
     WaveSignal,
@@ -66,29 +66,6 @@ _SCALAR_KINDS = frozenset({
 
 
 _OOB_BRUSH = QBrush(QColor(160, 40, 40))  # dark red for out-of-range cells
-
-
-# ── Fixed-point quantization (no external library) ────────────────────────────
-
-def _fp_quantize(value: float, width: int, lsb: int, signed: bool) -> float:
-    """Quantize *value* to a fixed-point format and return the representable float.
-
-    Uses truncation-toward-zero and wrapping overflow — matches typical HDL
-    behaviour for arithmetic results that overflow the destination format.
-
-    Args:
-        value:  Real-valued input.
-        width:  Total bit width (integer + fractional bits).
-        lsb:    Position of the LSB (negative for fractional bits).
-        signed: True for sfixed (two's complement), False for ufixed.
-    """
-    step = 2.0 ** lsb
-    raw = math.trunc(value / step)   # truncate toward zero
-    mask = (1 << width) - 1
-    raw = int(raw) & mask            # wrap to width bits
-    if signed and raw >= (1 << (width - 1)):
-        raw -= 1 << width
-    return raw * step
 
 
 # ── SimulationPanel ───────────────────────────────────────────────────────────
@@ -670,51 +647,33 @@ class SimulationPanel(QWidget):
 
     @staticmethod
     def _quantize(value: Any | None, port: Port, generics: dict[str, Any]) -> Any | None:
-        """Quantize *value* to the port's fixed-point format for the co-sim pass."""
+        """Pre-quantize *value* to the nearest representable plain float for the port.
+
+        Uses the fixedpoint library for format resolution so the result is
+        consistent with the fixed-point simulation pass.
+        """
         if value is None:
             return None
         kind_str = SimulationPanel._resolve_kind_str(port, generics)
         if kind_str not in (SignalKind.SFIXED.value, SignalKind.UFIXED.value):
-            return value  # not a fixed-point port — pass through as-is
+            return value
         try:
-            int_g = {
-                n: int(v) for n, v in generics.items()
-                if isinstance(v, (int, float))
-            }
-            w = _eval_index(port.signal_type.width, int_g)
-            l = _eval_index(port.signal_type.lsb,   int_g)
-            signed = (kind_str == SignalKind.SFIXED.value)
-            return _fp_quantize(float(value), w, l, signed)
+            int_g = {n: int(v) for n, v in generics.items() if isinstance(v, (int, float))}
+            fmt = port.signal_type.to_fpformat(int_g)
+            return float(fmt.quantize(np.array(float(value))))
         except Exception:
-            return value  # fall back to float if format can't be resolved
+            return value
 
     @staticmethod
     def _extract_value(result: Any) -> Any | None:
-        """Convert a BehaviorExecutor return value to a plain Python scalar."""
+        """Convert any BehaviorExecutor result to a plain Python scalar (float/bool/int)."""
         if result is None:
             return None
-        # numpy scalar or array with .item()
-        if hasattr(result, "item"):
-            try:
-                return float(result.item())
-            except Exception:
-                pass
-        # Plain scalar
         if isinstance(result, bool):
             return result
-        if isinstance(result, (int, float)):
-            return result
-        # FixedPointArray: access the float representation via .values
-        if hasattr(result, "values"):
-            try:
-                import numpy as np
-                return float(np.asarray(result.values).flat[0])
-            except Exception:
-                pass
-        # Last resort
         try:
             return float(result)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _show_error(self, msg: str) -> None:
