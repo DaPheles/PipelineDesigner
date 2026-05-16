@@ -575,6 +575,7 @@ class SimulationPanel(QWidget):
                     for port in out_ports:
                         output_vals[port.name].append(None)
             except Exception as exc:
+                self._show_error(f"Cycle {cyc}: {exc}")
                 for port in out_ports:
                     output_vals[port.name].append(None)
 

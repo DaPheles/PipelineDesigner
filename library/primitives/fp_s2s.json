@@ -66,6 +66,6 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "q_fmt   = SFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\nq_min   = q_fmt.real_min\nq_max   = q_fmt.real_max\na_real  = a.values.flat[0] if isinstance(a, FixedPointArray) else float(a)\nclamped = q_min if a_real <= q_min else q_max if a_real >= q_max else a_real\nresult  = clamped if CLAMP_EN else a_real\nif isinstance(a, FixedPointArray):\n    return q_fmt.quantize(np.array(float(result)))\nreturn result"
+        "code": "q_fmt  = SFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\na_real = float(a)\nif CLAMP_EN:\n    a_real = max(q_fmt.real_min, min(q_fmt.real_max, a_real))\nreturn q_fmt.quantize(np.array(a_real))"
     }
 }
