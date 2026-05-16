@@ -85,6 +85,8 @@ class DesignSimulator:
 
         # UUID → ComponentDefinition
         self._inst_def: dict[UUID, ComponentDefinition] = {}
+        # UUID → human-readable instance label for error messages
+        self._inst_label: dict[UUID, str] = {}
         # UUID → resolved generic values for each instance
         self._inst_generics: dict[UUID, dict[str, Any]] = {}
         # UUIDs of register instances (two-phase semantics)
@@ -123,7 +125,8 @@ class DesignSimulator:
                     f"Component '{inst.definition_ref}' not found in library. "
                     f"Available: {sorted(library)}"
                 )
-            self._inst_def[inst.id] = defn
+            self._inst_def[inst.id]   = defn
+            self._inst_label[inst.id] = inst.get_display_name()
 
             # Merge component-definition defaults with per-instance overrides so
             # that generics like H0/WIDTH are always present by name in the
@@ -346,7 +349,11 @@ class DesignSimulator:
             latency    = self._inst_def[inst_id].latency
 
             args = [self._resolve(inst_id, p) for p in in_ports]
-            result = executor(*args)
+            try:
+                result = executor(*args)
+            except Exception as exc:
+                label = self._inst_label.get(inst_id, str(inst_id))
+                raise type(exc)(f"[{label}] {exc}") from exc
 
             # Unpack result into per-port dict first
             raw: dict[str, Any] = {}
