@@ -1,22 +1,15 @@
 """Simulation evaluation panel for primitive behavior testing.
 
-Provides a cycle-accurate Python-mode simulation of behavior pseudo-code.
-Inputs are parsed as plain Python floats and passed directly to the
-BehaviorExecutor — no fixed-point quantization in the hot path.  This
-gives ideal floating-point results that match the mathematical intent.
+Always runs two passes per click:
+  1. Float (ideal) pass — inputs are plain floats; executor uses FloatSimNamespace
+     so quantize() is an identity and all math runs at full Python float precision.
+  2. Fixed-point pass  — inputs are pre-quantized to the port's declared sfixed/ufixed
+                         format (truncated float), then the executor uses the real
+                         fixedpoint namespace.  Explicit SFixed()/UFixed() calls in
+                         the behavior code produce clamping and truncation.
 
-Co-simulation mode
-------------------
-When the Co-sim toggle is active the panel runs two passes per click:
-  1. Float pass  — inputs are plain floats; executor runs normal Python arithmetic.
-  2. Fixed pass  — inputs are quantized to the port's declared sfixed/ufixed
-                   format (truncation + wrapping) before being passed to the
-                   executor.  The executor still runs with plain floats (the
-                   quantized value IS a Python float with reduced precision).
-
-Both results appear as separate waveform lanes so the representation error is
-visible directly.  No external fixed-point library is required — quantization
-is implemented with integer bit-masking.
+Both results are shown in the same waveform lane (white = ideal, orange = fixed-point),
+matching the format used by the main-window design simulation panel.
 
 Generic types (``signal_kind``) must be set concretely in the
 "Simulation Generics" section before running.
@@ -30,7 +23,6 @@ from typing import Any, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QGridLayout,
     QGroupBox,
@@ -116,10 +108,12 @@ class SimulationPanel(QWidget):
     def __init__(
         self,
         behavior_getter: Callable[[], str],
+        ideal_code_getter: Callable[[], str | None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._behavior_getter = behavior_getter
+        self._behavior_getter   = behavior_getter
+        self._ideal_code_getter = ideal_code_getter or (lambda: None)
         self._ports:    list[Port]    = []
         self._generics: list[Generic] = []
         self._n_cycles: int = self.DEFAULT_CYCLES
@@ -172,15 +166,6 @@ class SimulationPanel(QWidget):
         )
         self._sim_btn.clicked.connect(self._run_simulation)
         hbar.addWidget(self._sim_btn)
-        hbar.addSpacing(12)
-
-        self._cosim_cb = QCheckBox("Co-sim (float + fixed-point)")
-        self._cosim_cb.setStyleSheet("color:#cdd6f4; font-size:8pt;")
-        self._cosim_cb.setToolTip(
-            "Run a second pass with inputs quantized to the declared sfixed/ufixed\n"
-            "format so you can compare ideal vs. fixed-point results."
-        )
-        hbar.addWidget(self._cosim_cb)
         hbar.addStretch()
         root.addLayout(hbar)
 
@@ -224,7 +209,7 @@ class SimulationPanel(QWidget):
         wave_layout = QVBoxLayout(wave_frame)
         wave_layout.setContentsMargins(0, 0, 0, 0)
         wave_layout.setSpacing(2)
-        wave_label = QLabel("Waveform  (blue = input, green = output)")
+        wave_label = QLabel("Waveform  (blue = input, green = output [float / orange = fixed-point])")
         wave_label.setStyleSheet("color:#6c7086; font-size:8pt;")
         wave_layout.addWidget(wave_label)
         self._wave_scroll = QScrollArea()
@@ -471,11 +456,12 @@ class SimulationPanel(QWidget):
             return
 
         raw_data = self._get_input_data()
-        cosim = self._cosim_cb.isChecked()
 
-        # Parse inputs as plain floats (primary mode)
+        # Float pass: plain floats passed to FloatSimNamespace (identity quantize).
+        # Fixed pass: inputs pre-quantized to port precision (plain float with
+        #             reduced precision), executor uses real fixedpoint namespace.
         float_inputs: dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
-        fp_inputs:    dict[str, list[Any | None]] = {p.name: [] for p in in_ports} if cosim else {}
+        fp_inputs:    dict[str, list[Any | None]] = {p.name: [] for p in in_ports}
 
         for row, port in enumerate(in_ports):
             row_strs = raw_data[row] if row < len(raw_data) else []
@@ -483,21 +469,17 @@ class SimulationPanel(QWidget):
                 txt = row_strs[c] if c < len(row_strs) else ""
                 fval = self._parse_float(txt, port, sim_generics)
                 float_inputs[port.name].append(fval)
-                if cosim:
-                    fp_inputs[port.name].append(
-                        self._quantize(fval, port, sim_generics)
-                    )
+                fp_inputs[port.name].append(self._quantize(fval, port, sim_generics))
 
         float_outputs: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
-        fp_outputs:    dict[str, list[Any | None]] = {p.name: [] for p in out_ports} if cosim else {}
+        fp_outputs:    dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
 
         port_names_lower = {p.name.lower() for p in self._ports}
         is_register = {"d", "q", "clk"}.issubset(port_names_lower)
 
         if is_register:
             self._fill_register_outputs(float_inputs, float_outputs, sim_generics)
-            if cosim:
-                self._fill_register_outputs(fp_inputs, fp_outputs, sim_generics)
+            self._fill_register_outputs(fp_inputs, fp_outputs, sim_generics)
         else:
             code = self._behavior_getter().strip()
             if not code:
@@ -505,29 +487,43 @@ class SimulationPanel(QWidget):
                 return
 
             exec_ports = [p for p in in_ports if p.signal_class != PortSignalClass.RESET]
+            is_stateful = "state" in code
+
+            # Float/ideal executor: use ideal_code when available, otherwise
+            # run the same code under FloatSimNamespace (quantize → identity).
+            ideal_code = self._ideal_code_getter()
             try:
-                executor = BehaviorExecutor(
+                executor_float = BehaviorExecutor(
+                    code_body=ideal_code if ideal_code else code,
+                    param_names=[p.name for p in exec_ports],
+                    name="sim_float",
+                    extra_ns=sim_generics,
+                    float_mode=True,
+                )
+            except Exception as exc:
+                self._show_error(f"Compile error (float):\n{exc}")
+                return
+
+            self._run_executor(executor_float, exec_ports, float_inputs, float_outputs, out_ports, is_stateful)
+
+            # Fixed-point executor: original code with real fixedpoint namespace.
+            try:
+                executor_fixed = BehaviorExecutor(
                     code_body=code,
                     param_names=[p.name for p in exec_ports],
-                    name="sim",
+                    name="sim_fixed",
                     extra_ns=sim_generics,
+                    float_mode=False,
                 )
-            except SyntaxError as exc:
-                self._show_error(f"Syntax error:\n{exc}")
-                return
-            except Exception as exc:
-                self._show_error(f"Compile error:\n{exc}")
-                return
+                self._run_executor(executor_fixed, exec_ports, fp_inputs, fp_outputs, out_ports, is_stateful)
+            except Exception:
+                # If the fixed executor fails to compile (e.g. bit-op-only code),
+                # fill with None so the float lane still shows.
+                for port in out_ports:
+                    fp_outputs[port.name] = [None] * self._n_cycles
 
-            is_stateful = "state" in code
-            self._run_executor(executor, exec_ports, float_inputs, float_outputs, out_ports, is_stateful)
-
-            if cosim:
-                # Re-use same compiled executor with fp-quantized inputs
-                executor.reset_state()
-                self._run_executor(executor, exec_ports, fp_inputs, fp_outputs, out_ports, is_stateful)
-
-        # Build wave signals
+        # Build wave signals — inputs as plain lanes, outputs as combined
+        # (float_val, fixed_val) tuples matching the design simulation panel.
         wave_signals: list[WaveSignal] = []
         for port in in_ports:
             kind_str = self._resolve_kind_str(port, sim_generics)
@@ -541,19 +537,22 @@ class SimulationPanel(QWidget):
         for port in out_ports:
             kind_str = self._resolve_kind_str(port, sim_generics)
             is_bit = kind_str in _BIT_KINDS
-            label = port.name + " (float)" if cosim else port.name
-            wave_signals.append(WaveSignal(
-                name=label,
-                is_input=False,
-                is_bit=is_bit,
-                values=float_outputs[port.name],
-            ))
-            if cosim:
+            if is_bit:
                 wave_signals.append(WaveSignal(
-                    name=port.name + " (fp)",
+                    name=port.name,
                     is_input=False,
-                    is_bit=is_bit,
-                    values=fp_outputs[port.name],
+                    is_bit=True,
+                    values=float_outputs[port.name],
+                ))
+            else:
+                combined: list[Any | None] = []
+                for fv, xv in zip(float_outputs[port.name], fp_outputs[port.name]):
+                    combined.append(None if fv is None else (fv, xv))
+                wave_signals.append(WaveSignal(
+                    name=port.name,
+                    is_input=False,
+                    is_bit=False,
+                    values=combined,
                 ))
 
         self._waveform.set_data(wave_signals, self._n_cycles)

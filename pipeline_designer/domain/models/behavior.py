@@ -343,11 +343,22 @@ class ComponentBehavior(BaseModel):
 
     ``code`` is only the function *body*.  The signature is derived at
     display time from the port ``SignalType`` declarations.
+
+    ``ideal_code`` is an optional simplified body used by the float/ideal
+    simulation pass.  Needed only for primitives whose ``code`` uses bit
+    operations or other constructs that do not work with plain Python floats
+    (e.g. Adder_Carry).  When absent the float pass uses ``code`` together
+    with ``FloatSimNamespace``, which makes every quantize() call a no-op.
     """
 
     model_config = ConfigDict(extra="ignore")  # silently drop legacy port_types
 
     code: str = Field(
         default="",
-        description="Function body in Python-like pseudo-code",
+        description="Function body in Python-like pseudo-code (fixed-point mode)",
+    )
+    ideal_code: str | None = Field(
+        default=None,
+        description="Simplified body for ideal/float simulation. "
+                    "Omit when FloatSimNamespace handles the code transparently.",
     )

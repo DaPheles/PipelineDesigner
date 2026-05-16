@@ -79,9 +79,15 @@ class DesignSimulator:
         y = sim.get_output("y_out")
     """
 
-    def __init__(self, design: Design, library: dict[str, ComponentDefinition]):
-        self._design  = design
-        self._library = library
+    def __init__(
+        self,
+        design: Design,
+        library: dict[str, ComponentDefinition],
+        float_mode: bool = False,
+    ):
+        self._design      = design
+        self._library     = library
+        self._float_mode  = float_mode
 
         # UUID → ComponentDefinition
         self._inst_def: dict[UUID, ComponentDefinition] = {}
@@ -168,11 +174,19 @@ class DesignSimulator:
                 self._exec_input_ports[inst.id]  = in_ports
                 self._exec_output_ports[inst.id] = out_ports
 
+                # In float/ideal mode prefer ideal_code when the primitive
+                # provides one (e.g. Adder_Carry which uses bit operations).
+                code_body = (
+                    defn.behavior.ideal_code
+                    if self._float_mode and defn.behavior.ideal_code
+                    else defn.behavior.code
+                )
                 self._executors[inst.id] = BehaviorExecutor(
-                    code_body=defn.behavior.code,
+                    code_body=code_body,
                     param_names=in_ports,
                     name=defn.name,
-                    extra_ns=resolved,  # inject generics by name for direct access
+                    extra_ns=resolved,
+                    float_mode=self._float_mode,
                 )
 
         # Build interface name sets
@@ -228,9 +242,13 @@ class DesignSimulator:
     def _infer_reg_zero(self, reg_id: UUID) -> SignalValue:
         """Return a zero signal value for a register's Q output.
 
-        Traces Q to a consumer port, reads its SignalType, and quantizes 0.0
-        to that format.  Falls back to numpy float64(0.0) if unavailable.
+        In float mode always returns plain 0.0.  In fixed-point mode traces Q
+        to a consumer port, reads its SignalType, and quantizes 0.0 to that
+        format.  Falls back to numpy float64(0.0) if unavailable.
         """
+        if self._float_mode:
+            return np.float64(0.0)
+
         for (tgt_id, tgt_port), driver in self._drivers.items():
             src_id, src_port = driver
             if src_id != reg_id or src_port != "q":
@@ -389,6 +407,7 @@ class DesignSimulator:
 
             # Apply latency buffering when declared; otherwise pass through
             for pname, val in raw.items():
+                val = self._quantize_signal(val, inst_id, pname)
                 key = (inst_id, pname)
                 if latency > 0:
                     buf = self._latency_buffers[key]
@@ -405,6 +424,33 @@ class DesignSimulator:
             else:
                 new_q[(reg_id, "q")] = self._resolve(reg_id, "d")
         self._signals.update(new_q)
+
+    def _quantize_signal(self, val: Any, inst_id: UUID, port_name: str) -> Any:
+        """Quantize an executor output to its port's fixed-point format.
+
+        Only active in fixed-point mode.  Passes through values unchanged in
+        float mode or when the port format cannot be determined (e.g. std_logic).
+        """
+        if self._float_mode:
+            return val
+        defn = self._inst_def[inst_id]
+        port_obj = next((p for p in defn.get_output_ports() if p.name == port_name), None)
+        if port_obj is None:
+            return val
+        try:
+            fmt = port_obj.signal_type.to_fpformat(self._inst_generics[inst_id])
+        except Exception:
+            return val
+        # UnquantizedResult from FixedPointArray arithmetic (e.g. a + b, a * b)
+        if hasattr(val, 'quantize') and hasattr(val, 'keep_full'):
+            return val.quantize(fmt)
+        # FixedPointArray: re-quantize to the declared output format
+        if hasattr(val, 'requantize') and hasattr(val, 'fmt'):
+            return val.requantize(fmt)
+        # Plain Python / numpy scalar
+        if isinstance(val, (int, float, np.floating, np.integer)):
+            return fmt.quantize(np.array(float(val)))
+        return val
 
     def _resolve(self, consumer_id: UUID, port_name: str) -> SignalValue | None:
         """Look up the current value driving (consumer_id, port_name)."""

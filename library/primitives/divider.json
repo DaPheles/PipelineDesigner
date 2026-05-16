@@ -89,6 +89,7 @@
     },
     "latency": 3,
     "behavior": {
-        "code": "return a // b"
+        "code": "return a // b",
+        "ideal_code": "b_f = float(b)\nreturn float(a) / b_f if b_f != 0.0 else 0.0"
     }
 }

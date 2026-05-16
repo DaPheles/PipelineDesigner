@@ -385,14 +385,14 @@ class DesignSimulationPanel(QWidget):
 
         if self._dirty or self._simulator_float is None:
             try:
-                self._simulator_float = DesignSimulator(design, self._library)
+                self._simulator_float = DesignSimulator(design, self._library, float_mode=True)
             except Exception as exc:
                 self._show_error(f"Build error: {exc}")
                 return
 
         if self._dirty or self._simulator_fixed is None:
             try:
-                self._simulator_fixed = DesignSimulator(design, self._library)
+                self._simulator_fixed = DesignSimulator(design, self._library, float_mode=False)
             except Exception as exc:
                 self._show_error(f"Build error (fixed): {exc}")
                 return
@@ -514,7 +514,12 @@ class DesignSimulationPanel(QWidget):
 
     @staticmethod
     def _quantize_input(value: Any | None, port: InterfacePort) -> Any | None:
-        """Quantize *value* to the port's fixed-point format for fixed-point sim."""
+        """Pre-quantize *value* to the nearest representable float for the port's format.
+
+        Returns a plain Python float rounded to the port's fixed-point precision.
+        Using plain floats (not FixedPointArray) keeps arithmetic behavior codes
+        (e.g. ``return a + b``) working without producing UnquantizedResult objects.
+        """
         if value is None:
             return None
         st = port.effective_signal_type()
@@ -523,7 +528,8 @@ class DesignSimulationPanel(QWidget):
             return value  # not a fixed-point type, pass through as-is
         try:
             fmt = st.to_fpformat()
-            return fmt.quantize(np.array(float(value)))
+            fp = fmt.quantize(np.array(float(value)))
+            return float(fp.values)
         except Exception:
             return value
 
@@ -531,6 +537,12 @@ class DesignSimulationPanel(QWidget):
     def _extract_value(result: Any) -> Any | None:
         if result is None:
             return None
+        # FixedPointArray: extract float via .values (numpy array of real values)
+        if hasattr(result, "values") and not hasattr(result, "item"):
+            try:
+                return float(np.asarray(result.values).flat[0])
+            except Exception:
+                pass
         try:
             if hasattr(result, "item"):
                 return float(result.item())

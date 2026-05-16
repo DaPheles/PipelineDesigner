@@ -41,6 +41,7 @@ class BehaviorEditor(QWidget):
         self._ports:    list[Port]    = []
         self._generics: list[Generic] = []
         self._latency:  int           = 0
+        self._behavior: ComponentBehavior = ComponentBehavior()
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -91,7 +92,8 @@ class BehaviorEditor(QWidget):
 
         # ── Bottom pane: simulation panel ─────────────────────────────
         self._sim_panel = SimulationPanel(
-            behavior_getter=lambda: self._code_edit.toPlainText()
+            behavior_getter=lambda: self._code_edit.toPlainText(),
+            ideal_code_getter=lambda: self._behavior.ideal_code,
         )
         splitter.addWidget(self._sim_panel)
 
@@ -112,6 +114,7 @@ class BehaviorEditor(QWidget):
         self._ports    = list(ports)
         self._generics = list(generics or [])
         self._latency  = max(0, latency)
+        self._behavior = behavior
         self._code_edit.blockSignals(True)
         self._code_edit.setPlainText(behavior.code)
         self._code_edit.blockSignals(False)

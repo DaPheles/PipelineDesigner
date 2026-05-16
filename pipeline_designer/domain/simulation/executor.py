@@ -15,6 +15,14 @@ wrap / saturate / assert_no_overflow                     (SaturateMode strings)
 FPFormat / FixedPointArray / UnquantizedResult           (types)
 np                                                       (numpy)
 
+Float / ideal mode
+------------------
+When ``float_mode=True`` the executor uses ``FloatSimNamespace`` instead of
+``SimNamespace``.  Every fixed-point factory (SFixed / UFixed / Bits / Const)
+returns a ``_FloatFmt`` stub whose ``quantize()`` is an identity operation, so
+the same behavior code runs with unlimited intermediate precision.  Values
+entering and leaving the executor are plain Python ``float`` objects.
+
 Behavior code signature
 -----------------------
 The code body is compiled as the body of:
@@ -29,6 +37,7 @@ function must return the same.
 
 from __future__ import annotations
 
+import math
 import textwrap
 import types
 from typing import Any, Callable
@@ -102,6 +111,53 @@ class SimNamespace(dict):
             self.update(extra)
 
 
+# ── Float / ideal-mode namespace ─────────────────────────────────────────────
+
+class _FloatFmt:
+    """Drop-in stub for FPFormat used in float/ideal simulation mode.
+
+    Every quantize() call is an identity — values pass through at full Python
+    float precision.  real_min / real_max are ±inf so any saturation or
+    clamping logic in behavior code never activates, which is the correct
+    "ideal" semantic (unlimited word length, no overflow).
+    """
+
+    real_min: float = -math.inf
+    real_max: float =  math.inf
+    int_bits:  int = 0
+    frac_bits: int = 0
+
+    def quantize(self, x: Any, round: Any = None, overflow: Any = None) -> float:
+        v = np.asarray(x)
+        return float(v.flat[0])
+
+    def __call__(self, x: Any) -> float:
+        return float(x)
+
+
+_FLOAT_FMT = _FloatFmt()
+
+
+class FloatSimNamespace(SimNamespace):
+    """SimNamespace variant for ideal/float simulation.
+
+    Fixed-point type factories (SFixed, UFixed, Bits, Const) are replaced by
+    stubs that return plain Python floats, making every quantize() a no-op.
+    All other symbols (numpy, rounding-mode strings, etc.) are inherited.
+    """
+
+    def __init__(self, extra: dict[str, Any] | None = None):
+        super().__init__(extra)
+        self.update({
+            "SFixed":   lambda msb, lsb: _FLOAT_FMT,
+            "UFixed":   lambda msb, lsb: _FLOAT_FMT,
+            "Signed":   lambda msb, lsb: _FLOAT_FMT,
+            "Unsigned": lambda msb, lsb: _FLOAT_FMT,
+            "Bits":     lambda n:        _FLOAT_FMT,
+            "Const":    lambda fmt, v:   float(v),
+        })
+
+
 # ── Executor ─────────────────────────────────────────────────────────────────
 
 class BehaviorExecutor:
@@ -129,12 +185,14 @@ class BehaviorExecutor:
         param_names: list[str],
         name: str = "behavior",
         extra_ns: dict[str, Any] | None = None,
+        float_mode: bool = False,
     ):
         self._name   = name
         self._params = list(param_names)
         self._state: dict[str, Any] = {}
         combined = {**(extra_ns or {}), "state": self._state}
-        self._ns  = SimNamespace(combined)
+        ns_cls   = FloatSimNamespace if float_mode else SimNamespace
+        self._ns  = ns_cls(combined)
         self._fn  = self._compile(code_body)
 
     def reset_state(self) -> None:
