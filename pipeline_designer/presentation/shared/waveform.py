@@ -27,6 +27,7 @@ _C_UNKNOWN    = QColor("#f38ba8")   # red    unknown / X
 _C_TEXT       = QColor("#cdd6f4")   # light  text on bus
 _C_HEADER     = QColor("#313244")   # header row background
 _C_HDR_TEXT   = QColor("#6c7086")   # header cycle-number text
+_C_TEXT_FP    = QColor("#fab387")   # orange — fixed-point value line
 
 
 # ── Waveform data model ───────────────────────────────────────────────────────
@@ -69,11 +70,11 @@ class WaveformWidget(QWidget):
 
     HEADER_H    = 20    # cycle-number header row
     LANE_H      = 36    # default height for input signal lanes
-    LANE_H_OUT  = 52    # default height for output signal lanes (more room for values)
+    LANE_H_OUT  = 50    # default height for output signal lanes (more room for values)
     LABEL_W     = 130   # left label area
     CYCLE_W     = 64    # pixels per cycle
-    PAD_V       = 7     # vertical padding inside each lane
-    CHEV_W      = 9     # chevron half-width at bus transitions
+    PAD_V       = 4     # vertical padding inside each lane
+    CHEV_W      = 5     # chevron half-width at bus transitions
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -243,13 +244,28 @@ class WaveformWidget(QWidget):
                     p.drawLine(x0, y_mid, body_x, y_bot)
                 elif c == 0:
                     p.drawLine(x0, y_top, x0, y_bot)
-                txt = fmt_value(val)
-                p.setPen(QPen(_C_TEXT))
                 avail = x1 - body_x - 6
-                txt = fm.elidedText(txt, Qt.TextElideMode.ElideRight, max(avail, 4))
-                tw = fm.horizontalAdvance(txt)
-                if avail > 4:
-                    p.drawText(body_x + (avail - tw) // 2 + 4, y_mid + 4, txt)
+                if isinstance(val, tuple):
+                    float_val, fixed_val = val
+                    line_h = fm.ascent() + fm.descent() + 1
+                    y1 = y_mid + fm.ascent() - line_h
+                    y2 = y1 + line_h + 1
+                    for text_val, color, ty in (
+                        (fmt_value(float_val), _C_TEXT, y1),
+                        (fmt_value(fixed_val), _C_TEXT_FP, y2),
+                    ):
+                        p.setPen(QPen(color))
+                        elided = fm.elidedText(text_val, Qt.TextElideMode.ElideRight, max(avail, 4))
+                        tw = fm.horizontalAdvance(elided)
+                        if avail > 4:
+                            p.drawText(body_x + (avail - tw) // 2 + 4, ty, elided)
+                else:
+                    txt = fmt_value(val)
+                    p.setPen(QPen(_C_TEXT))
+                    txt = fm.elidedText(txt, Qt.TextElideMode.ElideRight, max(avail, 4))
+                    tw = fm.horizontalAdvance(txt)
+                    if avail > 4:
+                        p.drawText(body_x + (avail - tw) // 2 + 4, y_mid + 4, txt)
             prev = val
 
         x_end = self.LABEL_W + self._n_cycles * self.CYCLE_W

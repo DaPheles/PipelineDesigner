@@ -25,18 +25,15 @@ Single clock domain is assumed.  Interface ports are the external boundary:
 
 from __future__ import annotations
 
-import enum
 from typing import Any, Callable
 
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
@@ -65,12 +62,6 @@ _BIT_TYPES = frozenset({
 _OOB_BRUSH = QBrush(QColor(160, 40, 40))  # dark red for out-of-range cells
 
 
-class SimMode(enum.Enum):
-    FLOAT = "float"
-    FIXED = "fixed"
-    COSIM = "cosim"
-
-
 class DesignSimulationPanel(QWidget):
     """Multi-cycle simulation panel for a full Design graph."""
 
@@ -88,7 +79,6 @@ class DesignSimulationPanel(QWidget):
         self._simulator_fixed: DesignSimulator | None = None
         self._dirty = True
         self._n_cycles = self.DEFAULT_CYCLES
-        self._mode = SimMode.FLOAT
         self._input_ports:  list[InterfacePort] = []
         self._output_ports: list[InterfacePort] = []
         self._setup_ui()
@@ -119,7 +109,7 @@ class DesignSimulationPanel(QWidget):
         self.mark_dirty()
 
     def get_sim_config(self) -> dict:
-        """Return serialisable simulation configuration (cycles, mode, stimuli)."""
+        """Return serialisable simulation configuration (cycles, stimuli)."""
         stimuli: dict[str, list[str]] = {}
         for row in range(self._in_table.rowCount()):
             h = self._in_table.verticalHeaderItem(row)
@@ -130,19 +120,11 @@ class DesignSimulationPanel(QWidget):
                      if self._in_table.item(row, c) else "0")
                     for c in range(self._in_table.columnCount())
                 ]
-        return {"n_cycles": self._n_cycles, "mode": self._mode.value, "stimuli": stimuli}
+        return {"n_cycles": self._n_cycles, "stimuli": stimuli}
 
     def apply_sim_config(self, n_cycles: int, mode: str, stimuli: dict[str, list[str]]) -> None:
         """Restore simulation configuration; must be called after refresh_ports()."""
         self._cycle_spin.setValue(n_cycles)  # triggers _on_cycles_changed → column rebuild
-
-        try:
-            target = SimMode(mode)
-        except ValueError:
-            target = SimMode.FLOAT
-        btn = self._mode_buttons.get(target)
-        if btn:
-            btn.setChecked(True)
 
         if not stimuli:
             return
@@ -199,25 +181,6 @@ class DesignSimulationPanel(QWidget):
         hbar.addStretch()
         root.addLayout(hbar)
 
-        # ── Mode selector ─────────────────────────────────────────────
-        mode_bar = QHBoxLayout()
-        mode_bar.addWidget(QLabel("Mode:"))
-        self._mode_group = QButtonGroup(self)
-        self._mode_buttons: dict[SimMode, QRadioButton] = {}
-        for label, mode in (
-            ("Float (ideal)", SimMode.FLOAT),
-            ("Fixed-point", SimMode.FIXED),
-            ("Co-sim", SimMode.COSIM),
-        ):
-            rb = QRadioButton(label)
-            rb.setChecked(mode == self._mode)
-            rb.toggled.connect(lambda checked, m=mode: self._on_mode_toggled(checked, m))
-            self._mode_group.addButton(rb)
-            self._mode_buttons[mode] = rb
-            mode_bar.addWidget(rb)
-        mode_bar.addStretch()
-        root.addLayout(mode_bar)
-
         # ── Status / error label ──────────────────────────────────────
         self._status = QLabel("")
         self._status.setStyleSheet("color:#f38ba8; font-size:8pt;")
@@ -249,7 +212,7 @@ class DesignSimulationPanel(QWidget):
         wave_layout = QVBoxLayout(wave_frame)
         wave_layout.setContentsMargins(0, 0, 0, 0)
         wave_layout.setSpacing(2)
-        wave_lbl = QLabel("Waveform  (blue = input, green = output, orange = fixed-point)")
+        wave_lbl = QLabel("Waveform  (blue = input, green = output [float / orange = fixed-point])")
         wave_lbl.setStyleSheet("color:#6c7086; font-size:8pt;")
         wave_layout.addWidget(wave_lbl)
         self._wave_scroll = QScrollArea()
@@ -318,10 +281,6 @@ class DesignSimulationPanel(QWidget):
                 self._in_table.setItem(row, c, item)
         self._in_table.blockSignals(False)
         self._validate_all_cells()
-
-    def _on_mode_toggled(self, checked: bool, mode: SimMode) -> None:
-        if checked:
-            self._mode = mode
 
     def _get_input_data(self) -> list[list[str]]:
         return [
@@ -424,17 +383,14 @@ class DesignSimulationPanel(QWidget):
             self._show_error("Design has no interface ports.  Add inputs/outputs on the canvas.")
             return
 
-        run_float = self._mode in (SimMode.FLOAT, SimMode.COSIM)
-        run_fixed = self._mode in (SimMode.FIXED, SimMode.COSIM)
-
-        if run_float and (self._dirty or self._simulator_float is None):
+        if self._dirty or self._simulator_float is None:
             try:
                 self._simulator_float = DesignSimulator(design, self._library)
             except Exception as exc:
                 self._show_error(f"Build error: {exc}")
                 return
 
-        if run_fixed and (self._dirty or self._simulator_fixed is None):
+        if self._dirty or self._simulator_fixed is None:
             try:
                 self._simulator_fixed = DesignSimulator(design, self._library)
             except Exception as exc:
@@ -453,54 +409,50 @@ class DesignSimulationPanel(QWidget):
                 txt = row_strs[c] if c < len(row_strs) else ""
                 fval = self._parse_float(txt, port)
                 input_vals_float[port.name].append(fval)
-                input_vals_fixed[port.name].append(
-                    self._quantize_input(fval, port) if run_fixed else None
-                )
+                input_vals_fixed[port.name].append(self._quantize_input(fval, port))
 
         output_float: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
         output_fixed: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
 
-        if run_float:
-            sim = self._simulator_float
-            sim.reset()
-            for cyc in range(self._n_cycles):
-                for port in in_ports:
-                    v = input_vals_float[port.name][cyc]
-                    if v is not None:
-                        sim.set_input(port.name, v)
-                try:
-                    sim.step()
-                except Exception as exc:
-                    self._show_error(f"Float sim cycle {cyc}: {exc}")
-                    remaining = self._n_cycles - cyc
-                    for port in out_ports:
-                        output_float[port.name].extend([None] * remaining)
-                    break
+        sim_f = self._simulator_float
+        sim_f.reset()
+        for cyc in range(self._n_cycles):
+            for port in in_ports:
+                v = input_vals_float[port.name][cyc]
+                if v is not None:
+                    sim_f.set_input(port.name, v)
+            try:
+                sim_f.step()
+            except Exception as exc:
+                self._show_error(f"Float sim cycle {cyc}: {exc}")
+                remaining = self._n_cycles - cyc
                 for port in out_ports:
-                    output_float[port.name].append(
-                        self._extract_value(sim.get_output(port.name))
-                    )
+                    output_float[port.name].extend([None] * remaining)
+                break
+            for port in out_ports:
+                output_float[port.name].append(
+                    self._extract_value(sim_f.get_output(port.name))
+                )
 
-        if run_fixed:
-            sim = self._simulator_fixed
-            sim.reset()
-            for cyc in range(self._n_cycles):
-                for port in in_ports:
-                    v = input_vals_fixed[port.name][cyc]
-                    if v is not None:
-                        sim.set_input(port.name, v)
-                try:
-                    sim.step()
-                except Exception as exc:
-                    self._show_error(f"Fixed sim cycle {cyc}: {exc}")
-                    remaining = self._n_cycles - cyc
-                    for port in out_ports:
-                        output_fixed[port.name].extend([None] * remaining)
-                    break
+        sim_x = self._simulator_fixed
+        sim_x.reset()
+        for cyc in range(self._n_cycles):
+            for port in in_ports:
+                v = input_vals_fixed[port.name][cyc]
+                if v is not None:
+                    sim_x.set_input(port.name, v)
+            try:
+                sim_x.step()
+            except Exception as exc:
+                self._show_error(f"Fixed sim cycle {cyc}: {exc}")
+                remaining = self._n_cycles - cyc
                 for port in out_ports:
-                    output_fixed[port.name].append(
-                        self._extract_value(sim.get_output(port.name))
-                    )
+                    output_fixed[port.name].extend([None] * remaining)
+                break
+            for port in out_ports:
+                output_fixed[port.name].append(
+                    self._extract_value(sim_x.get_output(port.name))
+                )
 
         # Build waveform lanes
         signals: list[WaveSignal] = []
@@ -516,19 +468,22 @@ class DesignSimulationPanel(QWidget):
 
         for port in out_ports:
             is_bit = is_bit_fn(port)
-            if run_float:
+            if is_bit:
                 signals.append(WaveSignal(
-                    name=port.name + (" (float)" if self._mode == SimMode.COSIM else ""),
+                    name=port.name,
                     is_input=False,
-                    is_bit=is_bit,
+                    is_bit=True,
                     values=output_float[port.name],
                 ))
-            if run_fixed:
+            else:
+                combined: list[Any | None] = []
+                for f, x in zip(output_float[port.name], output_fixed[port.name]):
+                    combined.append(None if f is None else (f, x))
                 signals.append(WaveSignal(
-                    name=port.name + (" (fp)" if self._mode == SimMode.COSIM else ""),
+                    name=port.name,
                     is_input=False,
-                    is_bit=is_bit,
-                    values=output_fixed[port.name],
+                    is_bit=False,
+                    values=combined,
                 ))
 
         self._waveform.set_data(signals, self._n_cycles)
