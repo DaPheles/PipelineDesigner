@@ -184,8 +184,14 @@ class MainWindow(QMainWindow):
         export_vhdl_action = QAction("&Export VHDL…", self)
         export_vhdl_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
         export_vhdl_action.setCheckable(True)
-        export_vhdl_action.triggered.connect(lambda checked: self._vhdl_dock.setVisible(checked))
-        self._vhdl_dock.visibilityChanged.connect(lambda vis: export_vhdl_action.setChecked(vis))
+        def _toggle_vhdl_dock(checked: bool) -> None:
+            if checked:
+                self._vhdl_dock.show()
+                self._vhdl_dock.raise_()
+            else:
+                self._vhdl_dock.hide()
+        export_vhdl_action.triggered.connect(_toggle_vhdl_dock)
+        self._vhdl_dock.visibilityChanged.connect(export_vhdl_action.setChecked)
         tools_menu.addAction(export_vhdl_action)
 
         toggle_sim_action = QAction("&Show Simulation Panel", self)
