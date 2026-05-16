@@ -185,6 +185,68 @@ class StructuralVhdlGenerator:
             return f"{name}.{ep.port_name}"
         return "?"
 
+    def _signal_type_key(self, ep, inst_by_id: dict, iface_by_id: dict) -> tuple | None:
+        """Return a ``(kind, width_int, lsb_int)`` tuple evaluated against concrete generics.
+
+        Used so algebraically equivalent expressions like ``WIDTH+4+1`` and
+        ``WIDTH+5`` compare equal.  Returns ``None`` when the type cannot be
+        fully resolved to integers.
+        """
+        from pipeline_designer.domain.models.behavior import (
+            _eval_index, _substitute_generics, _SCALAR_KINDS,
+        )
+
+        outer_concrete: dict[str, int] = {
+            g.name: int(g.default_value)
+            for g in self._design.component_config.generics
+            if g.default_value is not None
+            and isinstance(g.default_value, (int, float))
+            and not isinstance(g.default_value, bool)
+        }
+
+        if ep.is_interface_port():
+            ip = iface_by_id.get(ep.interface_port_id)
+            if ip is None:
+                return None
+            st = ip.effective_signal_type()
+            int_g = outer_concrete
+        elif ep.component_id is not None:
+            inst = inst_by_id.get(ep.component_id)
+            if inst is None:
+                return None
+            defn = self._library.get(inst.definition_ref)
+            if defn is None:
+                return None
+            port = defn.get_port_by_name(ep.port_name)
+            if port is None:
+                return None
+            st = port.signal_type
+            resolved = _resolve_generics(inst, defn)
+            for name, val in list(resolved.items()):
+                if isinstance(val, str):
+                    try:
+                        resolved[name] = _eval_index(
+                            _substitute_generics(val, outer_concrete), outer_concrete
+                        )
+                    except (ValueError, KeyError):
+                        pass
+            int_g = {k: int(v) for k, v in {**outer_concrete, **resolved}.items()
+                     if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        else:
+            return None
+
+        k = st.resolved_kind(int_g)
+        if k is None:
+            return None
+        if k in _SCALAR_KINDS:
+            return (k.value, 0, 0)
+        try:
+            w = _eval_index(_substitute_generics(st.width, int_g), int_g)
+            l = _eval_index(_substitute_generics(st.lsb,   int_g), int_g)
+            return (k.value, w, l)
+        except (ValueError, KeyError):
+            return None
+
     def _check_signal_consistency(self) -> None:
         """Warn on connections where source and target port types differ."""
         inst_by_id  = {c.id: c for c in self._design.components}
@@ -197,6 +259,13 @@ class StructuralVhdlGenerator:
             if src_type is None or tgt_type is None:
                 continue
             if src_type == tgt_type:
+                continue
+
+            # String comparison failed — try integer-tuple comparison to catch
+            # algebraically equivalent expressions like WIDTH+4+1 vs WIDTH+5.
+            src_key = self._signal_type_key(conn.source, inst_by_id, iface_by_id)
+            tgt_key = self._signal_type_key(conn.target, inst_by_id, iface_by_id)
+            if src_key is not None and tgt_key is not None and src_key == tgt_key:
                 continue
 
             src_label = self._endpoint_label(conn.source, inst_by_id, iface_by_id)

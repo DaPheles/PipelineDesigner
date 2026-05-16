@@ -108,8 +108,8 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._vhdl_dock)
-        self.tabifyDockWidget(self._sim_dock, self._vhdl_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._vhdl_dock)
+        self.tabifyDockWidget(self._property_dock, self._vhdl_dock)
         self._vhdl_dock.hide()
 
         # Connect signals
@@ -174,14 +174,12 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        library_menu = menu_bar.addMenu("&Library")
+        tools_menu = menu_bar.addMenu("&Tools")
 
         primitive_editor_action = QAction("&Primitive Editor...", self)
         primitive_editor_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
         primitive_editor_action.triggered.connect(self._on_primitive_editor)
-        library_menu.addAction(primitive_editor_action)
-
-        tools_menu = menu_bar.addMenu("&Tools")
+        tools_menu.addAction(primitive_editor_action)
 
         export_vhdl_action = QAction("&Export VHDL…", self)
         export_vhdl_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
@@ -190,15 +188,13 @@ class MainWindow(QMainWindow):
         self._vhdl_dock.visibilityChanged.connect(lambda vis: export_vhdl_action.setChecked(vis))
         tools_menu.addAction(export_vhdl_action)
 
-        simulate_menu = menu_bar.addMenu("&Simulate")
-
         toggle_sim_action = QAction("&Show Simulation Panel", self)
         toggle_sim_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         toggle_sim_action.setCheckable(True)
         toggle_sim_action.setChecked(True)
         toggle_sim_action.triggered.connect(lambda checked: self._sim_dock.setVisible(checked))
         self._sim_dock.visibilityChanged.connect(lambda vis: toggle_sim_action.setChecked(vis))
-        simulate_menu.addAction(toggle_sim_action)
+        tools_menu.addAction(toggle_sim_action)
 
         view_menu = menu_bar.addMenu("&View")
 
