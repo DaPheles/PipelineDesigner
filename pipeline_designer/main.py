@@ -19,7 +19,7 @@ def main() -> int:
 
     app.setStyle("Fusion")
 
-    config = AppConfig()
+    config = AppConfig.load()
     window = MainWindow(config)
     window.show()
 

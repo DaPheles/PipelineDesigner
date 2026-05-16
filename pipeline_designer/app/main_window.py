@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self._setup_menus()
         self._setup_status_bar()
         self._load_library()
+        self._restore_session()
         self._update_title()
 
     def _setup_ui(self) -> None:
@@ -65,6 +66,7 @@ class MainWindow(QMainWindow):
 
         self._palette = ComponentPalette()
         self._palette_dock = QDockWidget("Components", self)
+        self._palette_dock.setObjectName("palette_dock")
         self._palette_dock.setWidget(self._palette)
         self._palette_dock.setMinimumWidth(200)
         self._palette_dock.setFeatures(
@@ -76,6 +78,7 @@ class MainWindow(QMainWindow):
         # Property editor panel (right dock)
         self._property_editor = PropertyEditor()
         self._property_dock = QDockWidget("Properties", self)
+        self._property_dock.setObjectName("property_dock")
         self._property_dock.setWidget(self._property_editor)
         self._property_dock.setMinimumWidth(200)
         self._property_dock.setFeatures(
@@ -87,6 +90,7 @@ class MainWindow(QMainWindow):
         # Simulation panel (bottom dock)
         self._sim_panel = DesignSimulationPanel(design_getter=self._scene.get_design)
         self._sim_dock = QDockWidget("Simulation", self)
+        self._sim_dock.setObjectName("sim_dock")
         self._sim_dock.setWidget(self._sim_panel)
         self._sim_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
@@ -102,6 +106,7 @@ class MainWindow(QMainWindow):
             library_getter=lambda: self._library_dict,
         )
         self._vhdl_dock = QDockWidget("VHDL Export", self)
+        self._vhdl_dock.setObjectName("vhdl_dock")
         self._vhdl_dock.setWidget(self._vhdl_panel)
         self._vhdl_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
@@ -557,6 +562,29 @@ class MainWindow(QMainWindow):
         # set_library is called inside _load_library(); mark ports dirty too
         self._sim_panel.mark_dirty()
         self._status_bar.showMessage("Library reloaded")
+
+    def _restore_session(self) -> None:
+        """Restore window geometry, dock layout, and last open file from config."""
+        geom = self._config.decode_geometry()
+        if geom is not None:
+            self.restoreGeometry(geom)
+
+        state = self._config.decode_state()
+        if state is not None:
+            self.restoreState(state)
+
+        if self._config.last_file:
+            path = Path(self._config.last_file)
+            if path.exists():
+                self._load_from_file(path)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Save session state to config.json before closing."""
+        self._config.encode_geometry(self.saveGeometry())
+        self._config.encode_state(self.saveState())
+        self._config.last_file = self._current_file
+        self._config.save()
+        super().closeEvent(event)
 
     def get_scene(self) -> DesignScene:
         """Get the design scene."""

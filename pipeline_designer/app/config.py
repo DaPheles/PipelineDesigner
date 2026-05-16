@@ -1,10 +1,14 @@
 """Application configuration settings."""
 
+import base64
+import logging
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from pipeline_designer.domain import DEFAULT_GRID, GridConfig
+
+log = logging.getLogger(__name__)
 
 
 class WindowConfig(BaseModel):
@@ -49,12 +53,69 @@ class AppConfig(BaseModel):
     )
     max_recent_files: int = Field(default=10, description="Maximum recent files to track")
 
+    # Session state — populated on close, restored on next launch
+    last_file: Path | None = Field(
+        default=None, description="Last opened design file"
+    )
+    session_geometry: str | None = Field(
+        default=None, description="Window geometry (base64-encoded QByteArray)"
+    )
+    session_state: str | None = Field(
+        default=None, description="Dock/toolbar layout (base64-encoded QByteArray)"
+    )
+
     def add_recent_file(self, path: Path) -> None:
         """Add a file to the recent files list."""
         if path in self.recent_files:
             self.recent_files.remove(path)
         self.recent_files.insert(0, path)
         self.recent_files = self.recent_files[: self.max_recent_files]
+
+    # ── Geometry helpers ──────────────────────────────────────────────────────
+
+    def encode_geometry(self, qbytearray) -> None:
+        """Store a QByteArray from saveGeometry() as a base64 string."""
+        self.session_geometry = base64.b64encode(bytes(qbytearray)).decode()
+
+    def decode_geometry(self):
+        """Return a QByteArray for restoreGeometry(), or None."""
+        if not self.session_geometry:
+            return None
+        from PySide6.QtCore import QByteArray
+        return QByteArray(base64.b64decode(self.session_geometry))
+
+    def encode_state(self, qbytearray) -> None:
+        """Store a QByteArray from saveState() as a base64 string."""
+        self.session_state = base64.b64encode(bytes(qbytearray)).decode()
+
+    def decode_state(self):
+        """Return a QByteArray for restoreState(), or None."""
+        if not self.session_state:
+            return None
+        from PySide6.QtCore import QByteArray
+        return QByteArray(base64.b64decode(self.session_state))
+
+    # ── Persistence ───────────────────────────────────────────────────────────
+
+    @classmethod
+    def get_config_path(cls) -> Path:
+        return Path.home() / ".config" / "pipeline_designer" / "config.json"
+
+    @classmethod
+    def load(cls) -> "AppConfig":
+        path = cls.get_config_path()
+        try:
+            return cls.model_validate_json(path.read_text())
+        except FileNotFoundError:
+            return cls()
+        except Exception:
+            log.warning("config.json is corrupt or unreadable — using defaults")
+            return cls()
+
+    def save(self) -> None:
+        path = self.get_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.model_dump_json(indent=2))
 
     @classmethod
     def get_default_library_path(cls) -> Path:
