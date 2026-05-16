@@ -181,6 +181,20 @@ class MainWindow(QMainWindow):
         primitive_editor_action.triggered.connect(self._on_primitive_editor)
         tools_menu.addAction(primitive_editor_action)
 
+        properties_action = QAction("&Properties Panel", self)
+        properties_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        properties_action.setCheckable(True)
+        properties_action.setChecked(True)
+        def _toggle_properties_dock(checked: bool) -> None:
+            if checked:
+                self._property_dock.show()
+                self._property_dock.raise_()
+            else:
+                self._property_dock.hide()
+        properties_action.triggered.connect(_toggle_properties_dock)
+        self._property_dock.visibilityChanged.connect(properties_action.setChecked)
+        tools_menu.addAction(properties_action)
+
         export_vhdl_action = QAction("&Export VHDL…", self)
         export_vhdl_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
         export_vhdl_action.setCheckable(True)
