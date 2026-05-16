@@ -116,7 +116,19 @@ class DesignSimulator:
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self, design: Design, library: dict[str, ComponentDefinition]) -> None:
+        from pipeline_designer.domain.models.behavior import _eval_index, _substitute_generics
+
         iface_by_id = {ip.id: ip for ip in design.interface_ports}
+
+        # Outer design generics that are concrete integers — used to evaluate
+        # string-valued instance generics like "WIDTH+5" or "LSB".
+        outer_concrete: dict[str, int] = {
+            g.name: int(g.default_value)
+            for g in design.component_config.generics
+            if g.default_value is not None
+            and isinstance(g.default_value, (int, float))
+            and not isinstance(g.default_value, bool)
+        }
 
         for inst in design.components:
             defn = library.get(inst.definition_ref)
@@ -133,6 +145,18 @@ class DesignSimulator:
             # executor namespace even when the instance uses all defaults.
             resolved = {g.name: g.default_value for g in defn.generics}
             resolved.update(inst.generic_values or {})
+
+            # Evaluate any string-valued generics (e.g. "WIDTH+5", "LSB") against
+            # the outer design's concrete defaults so behavior code receives ints.
+            for name, val in list(resolved.items()):
+                if isinstance(val, str):
+                    try:
+                        resolved[name] = _eval_index(
+                            _substitute_generics(val, outer_concrete), outer_concrete
+                        )
+                    except (ValueError, KeyError):
+                        pass
+
             self._inst_generics[inst.id] = resolved
 
             if self._is_register(defn):
