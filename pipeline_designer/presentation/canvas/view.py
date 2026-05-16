@@ -38,6 +38,7 @@ class DesignView(QGraphicsView):
         self._is_panning = False
         self._pan_start_x = 0
         self._pan_start_y = 0
+        self._pending_scroll: tuple[int, int] | None = None
 
         self._setup_view()
 
@@ -186,21 +187,34 @@ class DesignView(QGraphicsView):
         """Get the current zoom factor."""
         return self._zoom_factor
 
-    def get_scroll_offset(self) -> tuple[int, int]:
-        """Return current (horizontal, vertical) scrollbar positions."""
-        return (
-            self.horizontalScrollBar().value(),
-            self.verticalScrollBar().value(),
-        )
+    def get_scroll_offset(self) -> tuple[float, float]:
+        """Return the scene-coordinate centre of the current viewport.
 
-    def restore_view_state(self, zoom: float, scroll_x: int, scroll_y: int) -> None:
-        """Apply a saved zoom level and scroll position."""
+        Scene coordinates are zoom- and viewport-size-independent, making
+        them safe to round-trip through config across sessions.
+        """
+        centre = self.mapToScene(self.viewport().rect().center())
+        return (centre.x(), centre.y())
+
+    def restore_view_state(self, zoom: float, center_x: float, center_y: float) -> None:
+        """Apply a saved zoom level and viewport centre.
+
+        Zoom is applied immediately.  Centering is deferred to the first
+        event-loop tick after showEvent so the viewport has its final size.
+        """
         self.resetTransform()
         self.scale(zoom, zoom)
         self._zoom_factor = zoom
         self.zoom_changed.emit(zoom)
-        self.horizontalScrollBar().setValue(scroll_x)
-        self.verticalScrollBar().setValue(scroll_y)
+        self._pending_scroll = (center_x, center_y)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._pending_scroll is not None:
+            center_x, center_y = self._pending_scroll
+            self._pending_scroll = None
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.centerOn(center_x, center_y))
 
     def dragEnterEvent(self, event) -> None:
         """Handle drag enter for component drops."""

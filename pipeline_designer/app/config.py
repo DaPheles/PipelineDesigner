@@ -64,8 +64,8 @@ class AppConfig(BaseModel):
         default=None, description="Dock/toolbar layout (base64-encoded QByteArray)"
     )
     view_zoom: float = Field(default=1.0, description="Canvas zoom factor")
-    view_scroll_x: int = Field(default=0, description="Canvas horizontal scroll position")
-    view_scroll_y: int = Field(default=0, description="Canvas vertical scroll position")
+    view_scroll_x: float = Field(default=0.0, description="Canvas viewport centre X in scene coordinates")
+    view_scroll_y: float = Field(default=0.0, description="Canvas viewport centre Y in scene coordinates")
 
     def add_recent_file(self, path: Path) -> None:
         """Add a file to the recent files list."""
