@@ -216,7 +216,7 @@ class MainWindow(QMainWindow):
         toggle_sim_action = QAction("&Show Simulation Panel", self)
         toggle_sim_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         toggle_sim_action.setCheckable(True)
-        toggle_sim_action.setChecked(True)
+        toggle_sim_action.setChecked(False)
         toggle_sim_action.triggered.connect(lambda checked: self._sim_dock.setVisible(checked))
         self._sim_dock.visibilityChanged.connect(lambda vis: toggle_sim_action.setChecked(vis))
         tools_menu.addAction(toggle_sim_action)
@@ -573,6 +573,12 @@ class MainWindow(QMainWindow):
         if state is not None:
             self.restoreState(state)
 
+        # Explicit panel visibility overrides the opaque saveState blob so that
+        # these states are independently readable and editable in config.json.
+        self._property_dock.setVisible(self._config.panel_properties)
+        self._sim_dock.setVisible(self._config.panel_simulation)
+        self._vhdl_dock.setVisible(self._config.panel_vhdl_export)
+
         if self._config.last_file:
             path = Path(self._config.last_file)
             if path.exists():
@@ -595,6 +601,11 @@ class MainWindow(QMainWindow):
         scroll_x, scroll_y = self._view.get_scroll_offset()
         self._config.view_scroll_x = scroll_x
         self._config.view_scroll_y = scroll_y
+        # isHidden() is False for tabified-but-inactive docks — correctly
+        # distinguishes "open in tab group" from "explicitly closed".
+        self._config.panel_properties  = not self._property_dock.isHidden()
+        self._config.panel_simulation   = not self._sim_dock.isHidden()
+        self._config.panel_vhdl_export  = not self._vhdl_dock.isHidden()
         self._config.save()
         super().closeEvent(event)
 

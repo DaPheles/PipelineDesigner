@@ -67,6 +67,11 @@ class AppConfig(BaseModel):
     view_scroll_x: float = Field(default=0.0, description="Canvas viewport centre X in scene coordinates")
     view_scroll_y: float = Field(default=0.0, description="Canvas viewport centre Y in scene coordinates")
 
+    # Tools panel open/closed states
+    panel_properties: bool = Field(default=True, description="Properties panel open")
+    panel_simulation: bool = Field(default=True, description="Simulation panel open")
+    panel_vhdl_export: bool = Field(default=False, description="VHDL Export panel open")
+
     def add_recent_file(self, path: Path) -> None:
         """Add a file to the recent files list."""
         if path in self.recent_files:
