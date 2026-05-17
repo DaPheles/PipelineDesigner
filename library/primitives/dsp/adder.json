@@ -1,24 +1,24 @@
 {
-    "name": "Register",
-    "category": "primitives",
-    "description": "Basic D flip-flop register with synchronous reset",
+    "name": "Adder",
+    "category": "dsp",
+    "description": "Generic adder.",
     "ports": [
         {
-            "name": "clk",
+            "name": "a",
             "direction": "in",
-            "signal_class": "clock",
+            "signal_class": "data",
             "signal_type": {
-                "kind": "std_logic",
-                "width": "1",
-                "lsb": "0"
+                "kind": "sfixed",
+                "width": "WIDTH",
+                "lsb": "LSB"
             },
             "position": [
-                2,
-                8
+                0,
+                2
             ]
         },
         {
-            "name": "d",
+            "name": "b",
             "direction": "in",
             "signal_class": "data",
             "signal_type": {
@@ -32,17 +32,17 @@
             ]
         },
         {
-            "name": "q",
+            "name": "sum",
             "direction": "out",
             "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
-                "width": "WIDTH",
+                "width": "WIDTH+1",
                 "lsb": "LSB"
             },
             "position": [
                 4,
-                4
+                3
             ]
         }
     ],
@@ -60,11 +60,11 @@
     ],
     "visual": {
         "width": 4,
-        "height": 8,
-        "color": "#5b9bd5"
+        "height": 6,
+        "color": "#ed7d31"
     },
-    "latency": 1,
+    "latency": 0,
     "behavior": {
-        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\nreturn d"
+        "code": "return a + b"
     }
 }

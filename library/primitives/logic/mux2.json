@@ -1,8 +1,22 @@
 {
-    "name": "Subtract",
-    "category": "primitives",
-    "description": "Generic subtract.",
+    "name": "Mux2",
+    "category": "logic",
+    "description": "2:1 multiplexer",
     "ports": [
+        {
+            "name": "sel",
+            "direction": "in",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                2,
+                0
+            ],
+            "signal_class": "data"
+        },
         {
             "name": "a",
             "direction": "in",
@@ -32,11 +46,11 @@
             "signal_class": "data"
         },
         {
-            "name": "diff",
+            "name": "y",
             "direction": "out",
             "signal_type": {
                 "kind": "sfixed",
-                "width": "WIDTH+1",
+                "width": "WIDTH",
                 "lsb": "LSB"
             },
             "position": [
@@ -61,10 +75,10 @@
     "visual": {
         "width": 4,
         "height": 6,
-        "color": "#2ec27e"
+        "color": "#70ad47"
     },
     "latency": 0,
     "behavior": {
-        "code": "return a - b"
+        "code": "return a if sel else b"
     }
 }

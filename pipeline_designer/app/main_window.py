@@ -16,9 +16,10 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline_designer.domain.models import ComponentDefinition, Design
-from pipeline_designer.infrastructure.persistence import LibraryLoader
+from pipeline_designer.infrastructure.persistence import CategoryManager, LibraryLoader
 from pipeline_designer.presentation.canvas import DesignScene, DesignView
 from pipeline_designer.presentation.canvas.items import ComponentItem, ConnectionItem, InterfacePortItem, PortItem
+from pipeline_designer.presentation.dialogs.category_manager_dialog import CategoryManagerDialog
 from pipeline_designer.presentation.panels import ComponentPalette, PropertyEditor
 from pipeline_designer.presentation.simulation import DesignSimulationPanel
 from pipeline_designer.presentation.vhdl_export import VhdlExportPanel
@@ -179,6 +180,23 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        library_menu = menu_bar.addMenu("&Library")
+
+        manage_cats_action = QAction("&Manage Categories…", self)
+        manage_cats_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        manage_cats_action.triggered.connect(self._on_manage_categories)
+        library_menu.addAction(manage_cats_action)
+
+        library_menu.addSeparator()
+
+        add_user_lib_action = QAction("&Add User Library…", self)
+        add_user_lib_action.triggered.connect(self._on_add_user_library)
+        library_menu.addAction(add_user_lib_action)
+
+        remove_user_lib_action = QAction("&Remove User Library…", self)
+        remove_user_lib_action.triggered.connect(self._on_remove_user_library)
+        library_menu.addAction(remove_user_lib_action)
+
         tools_menu = menu_bar.addMenu("&Tools")
 
         primitive_editor_action = QAction("&Primitive Editor...", self)
@@ -247,23 +265,27 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Ready")
 
     def _load_library(self) -> None:
-        """Load the component library."""
-        library_path = self._config.library_path
-        if library_path is None:
-            library_path = AppConfig.get_default_library_path()
+        """Load the component library from all configured roots."""
+        primary_path = self._config.library_path or AppConfig.get_default_library_path()
+        extra_roots = list(self._config.user_library_paths)
 
-        self._library_loader = LibraryLoader(library_path)
+        self._library_loader = LibraryLoader(primary_path, extra_roots=extra_roots)
         self._library_loader.load_all()
 
-        components = self._library_loader.get_all_components()
-        self._palette.set_components(components)
+        primitives = self._library_loader.get_primitives()
+        composites = self._library_loader.get_composites()
+        self._palette.set_components(primitives, composites)
 
-        # Set library on scene with loader for composite component support
-        self._library_dict = {c.name: c for c in components}
+        all_components = primitives + composites
+        self._library_dict = {c.name: c for c in all_components}
         self._scene.set_library(self._library_dict, self._library_loader)
         self._sim_panel.set_library(self._library_dict)
 
-        self._status_bar.showMessage(f"Loaded {len(components)} components")
+        n_prim = len(primitives)
+        n_comp = len(composites)
+        self._status_bar.showMessage(
+            f"Library: {n_prim} primitive(s), {n_comp} component(s)"
+        )
 
     def _update_title(self) -> None:
         """Update the window title and property panel header."""
@@ -559,9 +581,49 @@ class MainWindow(QMainWindow):
     def _on_primitives_changed(self) -> None:
         """Reload the library after primitives are created, edited, or deleted."""
         self._load_library()
-        # set_library is called inside _load_library(); mark ports dirty too
         self._sim_panel.mark_dirty()
         self._status_bar.showMessage("Library reloaded")
+
+    def _on_manage_categories(self) -> None:
+        """Open the category manager dialog."""
+        primary = self._config.library_path or AppConfig.get_default_library_path()
+        readonly = list(self._config.user_library_paths)
+        manager = CategoryManager(primary, readonly_roots=readonly)
+        dlg = CategoryManagerDialog(manager, parent=self)
+        dlg.library_changed.connect(self._on_primitives_changed)
+        dlg.exec()
+
+    def _on_add_user_library(self) -> None:
+        """Prompt for a directory and add it as a user library root."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Select User Library Root", str(Path.home())
+        )
+        if not path:
+            return
+        lib_path = Path(path)
+        if lib_path not in self._config.user_library_paths:
+            self._config.user_library_paths.append(lib_path)
+            self._config.save()
+            self._load_library()
+            self._status_bar.showMessage(f"Added user library: {lib_path.name}")
+
+    def _on_remove_user_library(self) -> None:
+        """Let user pick and remove one of the configured user library roots."""
+        paths = self._config.user_library_paths
+        if not paths:
+            QMessageBox.information(self, "No User Libraries", "No user library roots are configured.")
+            return
+        names = [str(p) for p in paths]
+        choice, ok = QInputDialog.getItem(
+            self, "Remove User Library", "Select root to remove:", names, editable=False
+        )
+        if not ok:
+            return
+        idx = names.index(choice)
+        self._config.user_library_paths.pop(idx)
+        self._config.save()
+        self._load_library()
+        self._status_bar.showMessage("User library removed")
 
     def _restore_session(self) -> None:
         """Restore window geometry, dock layout, last open file, and canvas view from config."""

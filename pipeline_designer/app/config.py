@@ -56,7 +56,10 @@ class AppConfig(BaseModel):
     window: WindowConfig = Field(default_factory=WindowConfig)
     canvas: CanvasConfig = Field(default_factory=CanvasConfig)
     library_path: Path | None = Field(
-        default=None, description="Path to component library"
+        default=None, description="Path to primary component library"
+    )
+    user_library_paths: list[Path] = Field(
+        default_factory=list, description="Additional user-defined library roots"
     )
     recent_files: list[Path] = Field(
         default_factory=list, description="Recently opened files"

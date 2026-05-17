@@ -1,6 +1,6 @@
 {
     "name": "FIR4Tap",
-    "category": "DSP",
+    "category": "dsp",
     "description": "4-tap FIR filter \u2014 streaming single-sample interface. Each cycle one sample enters on x; the internal shift register shifts it through 4 stages and the dot product with H0..H3 appears on y. Pipelined MAC chain in hardware gives latency=4.",
     "ports": [
         {

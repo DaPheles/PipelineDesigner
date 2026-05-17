@@ -26,6 +26,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QColorDialog,
+    QComboBox,
     QDockWidget,
     QFormLayout,
     QInputDialog,
@@ -166,10 +167,15 @@ class PrimitiveEditorWindow(QMainWindow):
         self._name_edit.textChanged.connect(self._mark_modified)
         form.addRow("Name:", self._name_edit)
 
-        self._category_edit = QLineEdit()
-        self._category_edit.setPlaceholderText("e.g. primitives")
-        self._category_edit.textChanged.connect(self._mark_modified)
-        form.addRow("Category:", self._category_edit)
+        self._category_combo = QComboBox()
+        self._category_combo.setEditable(True)
+        self._category_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._category_combo.setToolTip(
+            "Select an existing category or use Library → Manage Categories to create one."
+        )
+        self._category_combo.currentTextChanged.connect(self._mark_modified)
+        self._refresh_category_combo()
+        form.addRow("Category:", self._category_combo)
 
         self._desc_edit = QTextEdit()
         self._desc_edit.setMaximumHeight(60)
@@ -269,9 +275,10 @@ class PrimitiveEditorWindow(QMainWindow):
         self._name_edit.setText(comp.name)
         self._name_edit.blockSignals(False)
 
-        self._category_edit.blockSignals(True)
-        self._category_edit.setText(comp.category)
-        self._category_edit.blockSignals(False)
+        self._refresh_category_combo()
+        self._category_combo.blockSignals(True)
+        self._category_combo.setCurrentText(comp.category)
+        self._category_combo.blockSignals(False)
 
         self._desc_edit.blockSignals(True)
         self._desc_edit.setPlainText(comp.description)
@@ -319,7 +326,7 @@ class PrimitiveEditorWindow(QMainWindow):
         w, h = self._canvas.get_size()
         return ComponentDefinition(
             name=self._name_edit.text().strip() or "Unnamed",
-            category=self._category_edit.text().strip() or "primitives",
+            category=self._category_combo.currentText().strip() or "arithmetic",
             description=self._desc_edit.toPlainText().strip(),
             latency=self._latency_spin.value(),
             visual=VisualConfig(width=w, height=h, color=self._color),
@@ -337,7 +344,7 @@ class PrimitiveEditorWindow(QMainWindow):
             return
         new_comp = ComponentDefinition(
             name="NewPrimitive",
-            category="primitives",
+            category=self._category_combo.currentText().strip() or "arithmetic",
             description="",
             latency=0,
             visual=VisualConfig(width=4, height=6, color="#4a90d9"),
@@ -531,9 +538,25 @@ class PrimitiveEditorWindow(QMainWindow):
         star = " *" if self._modified else ""
         self.setWindowTitle(f"Primitive Editor — {name}{star}")
 
+    def _refresh_category_combo(self) -> None:
+        """Repopulate the category combobox from the loader's current primitive categories."""
+        current_text = self._category_combo.currentText() if self._category_combo.count() > 0 else ""
+        self._category_combo.blockSignals(True)
+        self._category_combo.clear()
+        categories = self._loader.get_primitive_categories()
+        for cat in categories:
+            self._category_combo.addItem(cat)
+        if current_text:
+            idx = self._category_combo.findText(current_text)
+            if idx >= 0:
+                self._category_combo.setCurrentIndex(idx)
+            else:
+                self._category_combo.setCurrentText(current_text)
+        self._category_combo.blockSignals(False)
+
     def _clear_form(self) -> None:
         self._name_edit.clear()
-        self._category_edit.clear()
+        self._category_combo.setCurrentIndex(0)
         self._desc_edit.clear()
         self._latency_spin.setValue(0)
         self._generic_table.set_generics([])

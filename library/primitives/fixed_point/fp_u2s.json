@@ -1,6 +1,6 @@
 {
     "name": "FP_U2S",
-    "category": "primitives",
+    "category": "fixed_point",
     "description": "FixedPoint convertion from unsigned to signed",
     "ports": [
         {

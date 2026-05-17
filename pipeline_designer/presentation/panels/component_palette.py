@@ -1,11 +1,11 @@
 """Component palette for drag-and-drop component selection."""
 
-from PySide6.QtCore import QMimeData, Qt
+from PySide6.QtCore import QMimeData, QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QDrag, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QListWidget,
-    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QWidget,
 )
 
@@ -16,149 +16,214 @@ from pipeline_designer.domain.models import ComponentDefinition
 PORT_INPUT = "port:input"
 PORT_OUTPUT = "port:output"
 
+_SETTINGS_KEY = "component_palette/expanded"
 
-class ComponentPalette(QListWidget):
-    """List widget for selecting and dragging components."""
+
+class ComponentPalette(QTreeWidget):
+    """Tree widget for selecting and dragging components.
+
+    Structure::
+
+        Primitives
+          ├── <category>
+          │     ├── ComponentA
+          │     └── ComponentB
+          └── ...
+        Components
+          ├── <category>
+          │     └── ...
+          └── ...
+        Ports
+          ├── Input
+          └── Output
+    """
 
     def __init__(self, parent: QWidget | None = None):
-        """Initialize the component palette."""
         super().__init__(parent)
-
         self._components: dict[str, ComponentDefinition] = {}
-
         self._setup_widget()
 
     def _setup_widget(self) -> None:
-        """Configure widget settings."""
+        self.setHeaderHidden(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.setIconSize(self.iconSize().scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio))
-        self.setSpacing(2)
+        self.setIndentation(14)
+        self.setIconSize(QSize(20, 20))
+        self.setAnimated(True)
 
         self.setStyleSheet("""
-            QListWidget {
+            QTreeWidget {
                 background-color: #2b2b2b;
                 border: none;
                 color: #ffffff;
             }
-            QListWidget::item {
-                padding: 8px;
-                border-radius: 4px;
+            QTreeWidget::item {
+                padding: 4px 8px;
+                border-radius: 3px;
             }
-            QListWidget::item:selected {
+            QTreeWidget::item:selected {
                 background-color: #4a90d9;
             }
-            QListWidget::item:hover {
+            QTreeWidget::item:hover:!selected {
                 background-color: #3a3a3a;
+            }
+            QTreeWidget::branch {
+                background-color: #2b2b2b;
+            }
+            QTreeWidget::branch:has-children:!has-siblings:closed,
+            QTreeWidget::branch:closed:has-children:has-siblings {
+                border-image: none;
+                image: url(none);
             }
         """)
 
-    def set_components(self, components: list[ComponentDefinition]) -> None:
-        """Set the list of available components.
+    # ------------------------------------------------------------------ #
+    # Public API                                                           #
+    # ------------------------------------------------------------------ #
 
-        Args:
-            components: List of component definitions to display.
-        """
+    def set_components(
+        self,
+        primitives: list[ComponentDefinition],
+        composites: list[ComponentDefinition],
+    ) -> None:
+        """Rebuild the tree from separate primitive and composite lists."""
         self.clear()
         self._components.clear()
 
+        self._build_section("Primitives", primitives)
+        self._build_section("Components", composites)
+        self._build_ports_section()
+
+        self._restore_expand_state()
+
+    def get_component(self, name: str) -> ComponentDefinition | None:
+        return self._components.get(name)
+
+    # ------------------------------------------------------------------ #
+    # Tree building                                                        #
+    # ------------------------------------------------------------------ #
+
+    def _build_section(self, title: str, components: list[ComponentDefinition]) -> None:
+        section = QTreeWidgetItem(self, [title])
+        section.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        font = section.font(0)
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 1)
+        section.setFont(0, font)
+        section.setForeground(0, QColor("#aaaaaa"))
+
         categories: dict[str, list[ComponentDefinition]] = {}
         for comp in components:
-            if comp.category not in categories:
-                categories[comp.category] = []
-            categories[comp.category].append(comp)
+            categories.setdefault(comp.category, []).append(comp)
 
-        for category in sorted(categories.keys()):
-            category_item = QListWidgetItem(f"-- {category.upper()} --")
-            category_item.setFlags(Qt.ItemFlag.NoItemFlags)
-            category_item.setForeground(QColor("#888888"))
-            self.addItem(category_item)
+        for cat_name in sorted(categories.keys()):
+            cat_item = QTreeWidgetItem(section, [cat_name])
+            cat_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            cat_item.setForeground(0, QColor("#888888"))
+            cat_font = cat_item.font(0)
+            cat_font.setBold(True)
+            cat_item.setFont(0, cat_font)
 
-            for comp in sorted(categories[category], key=lambda c: c.name):
-                self._add_component_item(comp)
+            for comp in sorted(categories[cat_name], key=lambda c: c.name):
+                self._add_component_item(cat_item, comp)
 
-        # Add the special "ports" category at the end
-        self._add_ports_category()
+            cat_item.setExpanded(True)
 
-    def _add_component_item(self, component: ComponentDefinition) -> None:
-        """Add a component to the list."""
-        item = QListWidgetItem(component.name)
-        item.setData(Qt.ItemDataRole.UserRole, component.name)
-        item.setToolTip(component.description or f"Drag to add {component.name}")
+        section.setExpanded(True)
 
-        icon = self._create_component_icon(component)
-        item.setIcon(icon)
-
+    def _add_component_item(
+        self, parent: QTreeWidgetItem, component: ComponentDefinition
+    ) -> None:
+        item = QTreeWidgetItem(parent, [component.name])
+        item.setData(0, Qt.ItemDataRole.UserRole, component.name)
+        item.setToolTip(0, component.description or f"Drag to add {component.name}")
+        item.setFlags(
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsDragEnabled
+        )
+        item.setIcon(0, self._create_component_icon(component))
         self._components[component.name] = component
-        self.addItem(item)
 
-    def _add_ports_category(self) -> None:
-        """Add the special ports category with input/output items."""
-        # Category header
-        category_item = QListWidgetItem("-- PORTS --")
-        category_item.setFlags(Qt.ItemFlag.NoItemFlags)
-        category_item.setForeground(QColor("#888888"))
-        self.addItem(category_item)
+    def _build_ports_section(self) -> None:
+        section = QTreeWidgetItem(self, ["Ports"])
+        section.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        font = section.font(0)
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 1)
+        section.setFont(0, font)
+        section.setForeground(0, QColor("#aaaaaa"))
 
-        # Input port item
-        input_item = QListWidgetItem("Input")
-        input_item.setData(Qt.ItemDataRole.UserRole, PORT_INPUT)
-        input_item.setToolTip("Drag to input stage to add an input port")
-        input_item.setIcon(self._create_port_icon(is_input=True))
-        self.addItem(input_item)
+        input_item = QTreeWidgetItem(section, ["Input"])
+        input_item.setData(0, Qt.ItemDataRole.UserRole, PORT_INPUT)
+        input_item.setToolTip(0, "Drag to input stage to add an input port")
+        input_item.setFlags(
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsDragEnabled
+        )
+        input_item.setIcon(0, self._create_port_icon(is_input=True))
 
-        # Output port item
-        output_item = QListWidgetItem("Output")
-        output_item.setData(Qt.ItemDataRole.UserRole, PORT_OUTPUT)
-        output_item.setToolTip("Drag to output stage to add an output port")
-        output_item.setIcon(self._create_port_icon(is_input=False))
-        self.addItem(output_item)
+        output_item = QTreeWidgetItem(section, ["Output"])
+        output_item.setData(0, Qt.ItemDataRole.UserRole, PORT_OUTPUT)
+        output_item.setToolTip(0, "Drag to output stage to add an output port")
+        output_item.setFlags(
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsDragEnabled
+        )
+        output_item.setIcon(0, self._create_port_icon(is_input=False))
 
-    def _create_port_icon(self, is_input: bool) -> QIcon:
-        """Create a colored icon for a port item."""
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
+        section.setExpanded(True)
 
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    # ------------------------------------------------------------------ #
+    # Expand / collapse persistence                                        #
+    # ------------------------------------------------------------------ #
 
-        if is_input:
-            color = QColor("#27ae60")  # Green for input
-        else:
-            color = QColor("#e67e22")  # Orange for output
+    def _collect_expand_state(self) -> dict[str, bool]:
+        """Return {item_text: is_expanded} for all top-level and category items."""
+        state: dict[str, bool] = {}
+        for i in range(self.topLevelItemCount()):
+            section = self.topLevelItem(i)
+            key = section.text(0)
+            state[key] = section.isExpanded()
+            for j in range(section.childCount()):
+                cat = section.child(j)
+                state[f"{key}/{cat.text(0)}"] = cat.isExpanded()
+        return state
 
-        painter.setBrush(color)
-        painter.setPen(color.darker(150))
-        # Draw a circle for ports (different from component rectangles)
-        painter.drawEllipse(2, 2, 20, 20)
+    def _restore_expand_state(self) -> None:
+        settings = QSettings("PipelineDesigner", "ComponentPalette")
+        saved: dict = settings.value(_SETTINGS_KEY, {})
+        if not isinstance(saved, dict):
+            return
+        for i in range(self.topLevelItemCount()):
+            section = self.topLevelItem(i)
+            key = section.text(0)
+            if key in saved:
+                section.setExpanded(bool(saved[key]))
+            for j in range(section.childCount()):
+                cat = section.child(j)
+                cat_key = f"{key}/{cat.text(0)}"
+                if cat_key in saved:
+                    cat.setExpanded(bool(saved[cat_key]))
 
-        painter.end()
-        return QIcon(pixmap)
+    def save_expand_state(self) -> None:
+        """Persist current expand state to QSettings (call on app close)."""
+        settings = QSettings("PipelineDesigner", "ComponentPalette")
+        settings.setValue(_SETTINGS_KEY, self._collect_expand_state())
 
-    def _create_component_icon(self, component: ComponentDefinition) -> QIcon:
-        """Create a colored icon for a component."""
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        color = QColor(component.visual.color)
-        painter.setBrush(color)
-        painter.setPen(color.darker(150))
-        painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
-
-        painter.end()
-        return QIcon(pixmap)
+    # ------------------------------------------------------------------ #
+    # Drag & drop                                                          #
+    # ------------------------------------------------------------------ #
 
     def startDrag(self, supportedActions) -> None:
-        """Start a drag operation for the selected component or port."""
         item = self.currentItem()
         if item is None:
             return
 
-        item_data = item.data(Qt.ItemDataRole.UserRole)
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
         if item_data is None:
             return
 
@@ -167,79 +232,84 @@ class ComponentPalette(QListWidget):
         mime_data.setText(item_data)
         drag.setMimeData(mime_data)
 
-        # Handle port items vs component items
         if item_data in (PORT_INPUT, PORT_OUTPUT):
             pixmap = self._create_port_drag_pixmap(item_data == PORT_INPUT)
-            drag.setPixmap(pixmap)
-            drag.setHotSpot(pixmap.rect().center())
         else:
             component = self._components.get(item_data)
-            if component:
-                pixmap = self._create_drag_pixmap(component)
-                drag.setPixmap(pixmap)
-                drag.setHotSpot(pixmap.rect().center())
+            pixmap = self._create_drag_pixmap(component) if component else QPixmap()
 
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(pixmap.rect().center())
         drag.exec(Qt.DropAction.CopyAction)
 
-    def _create_port_drag_pixmap(self, is_input: bool) -> QPixmap:
-        """Create a pixmap for dragging a port item."""
-        size = 30
+    # ------------------------------------------------------------------ #
+    # Icon helpers                                                         #
+    # ------------------------------------------------------------------ #
 
-        pixmap = QPixmap(size, size)
+    def _create_component_icon(self, component: ComponentDefinition) -> QIcon:
+        pixmap = QPixmap(20, 20)
         pixmap.fill(Qt.GlobalColor.transparent)
-
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if is_input:
-            color = QColor("#27ae60")  # Green for input
-        else:
-            color = QColor("#e67e22")  # Orange for output
-
-        painter.setBrush(color)
-        painter.setPen(color.darker(150))
-        painter.drawEllipse(2, 2, size - 4, size - 4)
-
-        painter.end()
-        return pixmap
-
-    def _create_drag_pixmap(self, component: ComponentDefinition) -> QPixmap:
-        """Create a pixmap for the drag preview."""
-        width = int(component.visual.width)
-        height = int(component.visual.height)
-
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         color = QColor(component.visual.color)
         painter.setBrush(color)
         painter.setPen(color.darker(150))
-        painter.drawRoundedRect(1, 1, width - 2, height - 2, 8, 8)
+        painter.drawRoundedRect(1, 1, 18, 18, 3, 3)
+        painter.end()
+        return QIcon(pixmap)
 
+    def _create_port_icon(self, is_input: bool) -> QIcon:
+        pixmap = QPixmap(20, 20)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#27ae60") if is_input else QColor("#e67e22")
+        painter.setBrush(color)
+        painter.setPen(color.darker(150))
+        painter.drawEllipse(1, 1, 18, 18)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _create_drag_pixmap(self, component: ComponentDefinition) -> QPixmap:
+        w, h = int(component.visual.width), int(component.visual.height)
+        pixmap = QPixmap(max(w, 60), max(h, 30))
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(component.visual.color)
+        painter.setBrush(color)
+        painter.setPen(color.darker(150))
+        painter.drawRoundedRect(1, 1, pixmap.width() - 2, pixmap.height() - 2, 8, 8)
         painter.setPen(QColor("#ffffff"))
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, component.name)
-
         painter.end()
         return pixmap
 
-    def get_component(self, name: str) -> ComponentDefinition | None:
-        """Get a component definition by name."""
-        return self._components.get(name)
+    def _create_port_drag_pixmap(self, is_input: bool) -> QPixmap:
+        size = 30
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#27ae60") if is_input else QColor("#e67e22")
+        painter.setBrush(color)
+        painter.setPen(color.darker(150))
+        painter.drawEllipse(2, 2, size - 4, size - 4)
+        painter.end()
+        return pixmap
 
+
+# ------------------------------------------------------------------ #
+# Module-level helpers (unchanged interface for callers)              #
+# ------------------------------------------------------------------ #
 
 def is_port_item(item_data: str) -> bool:
-    """Check if the item data represents a port (not a component)."""
     return item_data in (PORT_INPUT, PORT_OUTPUT)
 
 
 def is_input_port_item(item_data: str) -> bool:
-    """Check if the item data represents an input port."""
     return item_data == PORT_INPUT
 
 
 def is_output_port_item(item_data: str) -> bool:
-    """Check if the item data represents an output port."""
     return item_data == PORT_OUTPUT

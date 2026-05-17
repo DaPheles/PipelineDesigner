@@ -1,14 +1,14 @@
 {
-    "name": "FP_S2S",
-    "category": "primitives",
-    "description": "FixedPoint convertion of signed numbers",
+    "name": "FP_U2U",
+    "category": "fixed_point",
+    "description": "FixedPoint convertion of unsigned numbers",
     "ports": [
         {
             "name": "a",
             "direction": "in",
             "signal_class": "data",
             "signal_type": {
-                "kind": "sfixed",
+                "kind": "ufixed",
                 "width": "A_WIDTH",
                 "lsb": "A_LSB"
             },
@@ -22,7 +22,7 @@
             "direction": "out",
             "signal_class": "data",
             "signal_type": {
-                "kind": "sfixed",
+                "kind": "ufixed",
                 "width": "Q_WIDTH",
                 "lsb": "Q_LSB"
             },
@@ -45,7 +45,7 @@
         },
         {
             "name": "Q_WIDTH",
-            "data_type": "natural",
+            "data_type": "integer",
             "default_value": 16
         },
         {
@@ -57,11 +57,6 @@
             "name": "CLAMP_EN",
             "data_type": "integer",
             "default_value": 1
-        },
-        {
-            "name": "ROUND",
-            "data_type": "string",
-            "default_value": "round_half_up"
         }
     ],
     "visual": {
@@ -71,6 +66,6 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "q_fmt  = SFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\na_real = float(a)\nif CLAMP_EN:\n    a_real = max(q_fmt.real_min, min(q_fmt.real_max, a_real))\nreturn q_fmt.quantize(a_real, round=ROUND)"
+        "code": "q_fmt  = UFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\na_real = float(a)\nif CLAMP_EN:\n    a_real = max(q_fmt.real_min, min(q_fmt.real_max, a_real))\nreturn q_fmt.quantize(np.array(a_real))"
     }
 }

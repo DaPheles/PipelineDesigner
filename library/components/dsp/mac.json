@@ -1,0 +1,315 @@
+{
+    "name": "Untitled",
+    "components": [
+        {
+            "id": "06482f09-a1a2-4f9f-97c2-de001066cb9c",
+            "definition_ref": "Mult",
+            "position": [
+                -14.0,
+                0.0
+            ],
+            "generic_values": {},
+            "pipeline_stage": null,
+            "instance_name": null,
+            "is_composite": false,
+            "stage_count": 1,
+            "alignment_index": 1
+        },
+        {
+            "id": "efedbd47-1d6d-4328-b55e-64b764d50d03",
+            "definition_ref": "Register",
+            "position": [
+                -21.0,
+                -6.0
+            ],
+            "generic_values": {},
+            "pipeline_stage": 1,
+            "instance_name": null,
+            "is_composite": false,
+            "stage_count": 1,
+            "alignment_index": 0
+        },
+        {
+            "id": "45aca534-4edf-4cf2-9834-323827ed9496",
+            "definition_ref": "Register",
+            "position": [
+                -21.0,
+                4.0
+            ],
+            "generic_values": {},
+            "pipeline_stage": 1,
+            "instance_name": null,
+            "is_composite": false,
+            "stage_count": 1,
+            "alignment_index": 0
+        },
+        {
+            "id": "d3c5daa4-8345-4b53-afd6-21f9061c19af",
+            "definition_ref": "Register",
+            "position": [
+                -6.0,
+                -1.0
+            ],
+            "generic_values": {},
+            "pipeline_stage": 2,
+            "instance_name": null,
+            "is_composite": false,
+            "stage_count": 1,
+            "alignment_index": 0
+        },
+        {
+            "id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
+            "definition_ref": "Adder",
+            "position": [
+                1.0,
+                5.0
+            ],
+            "generic_values": {},
+            "pipeline_stage": null,
+            "instance_name": null,
+            "is_composite": false,
+            "stage_count": 1,
+            "alignment_index": 2
+        }
+    ],
+    "connections": [
+        {
+            "id": "e0411d64-1117-4075-be1c-92b7a3133117",
+            "source": {
+                "component_id": null,
+                "port_name": "in",
+                "interface_port_id": "8dbae7bb-1ff6-41b5-8751-4646a95f0860"
+            },
+            "target": {
+                "component_id": "efedbd47-1d6d-4328-b55e-64b764d50d03",
+                "port_name": "d",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "1655c1f0-4e0b-4628-87fd-e554ccb49fcf",
+            "source": {
+                "component_id": null,
+                "port_name": "in1",
+                "interface_port_id": "7101418d-b5a5-49f7-bfb8-bfa4c1496926"
+            },
+            "target": {
+                "component_id": "45aca534-4edf-4cf2-9834-323827ed9496",
+                "port_name": "d",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "089ef80c-119d-408e-9e84-e611ccdd3fbb",
+            "source": {
+                "component_id": "efedbd47-1d6d-4328-b55e-64b764d50d03",
+                "port_name": "q",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": "06482f09-a1a2-4f9f-97c2-de001066cb9c",
+                "port_name": "a",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "ae28e33e-1f6e-4d7d-bc33-9c5dbde53f4c",
+            "source": {
+                "component_id": "45aca534-4edf-4cf2-9834-323827ed9496",
+                "port_name": "q",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": "06482f09-a1a2-4f9f-97c2-de001066cb9c",
+                "port_name": "b",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "8a065531-5e37-42be-9d82-7cb45e74e0b1",
+            "source": {
+                "component_id": "06482f09-a1a2-4f9f-97c2-de001066cb9c",
+                "port_name": "prod",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": "d3c5daa4-8345-4b53-afd6-21f9061c19af",
+                "port_name": "d",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "1cadb596-6915-4824-936f-a099dee69316",
+            "source": {
+                "component_id": "d3c5daa4-8345-4b53-afd6-21f9061c19af",
+                "port_name": "q",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
+                "port_name": "a",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "a37ca71e-aab4-4f19-99a2-b6a66c40fa12",
+            "source": {
+                "component_id": null,
+                "port_name": "in2",
+                "interface_port_id": "bbe413a3-9529-4ea0-a51a-7e6959fbb453"
+            },
+            "target": {
+                "component_id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
+                "port_name": "b",
+                "interface_port_id": null
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "7929c5db-ac72-4728-83b8-384cc4c9f627",
+            "source": {
+                "component_id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
+                "port_name": "sum",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": null,
+                "port_name": "out",
+                "interface_port_id": "e7120037-11ad-4c3f-b38e-ea8434763060"
+            },
+            "signal_name": null,
+            "waypoints": []
+        },
+        {
+            "id": "56466692-3f3a-4a17-8fb2-7acd8bf6fe6c",
+            "source": {
+                "component_id": "dc61fc0c-4612-4d6b-9360-625271fc931b",
+                "port_name": "cout",
+                "interface_port_id": null
+            },
+            "target": {
+                "component_id": null,
+                "port_name": "out1",
+                "interface_port_id": "625d7b9e-05f1-47ec-a0dc-26cb6f2f8521"
+            },
+            "signal_name": null,
+            "waypoints": []
+        }
+    ],
+    "stages": [
+        {
+            "id": "3e0dfcdc-55f7-42d5-9337-c1298110934b",
+            "index": 1,
+            "x_position": -21.0,
+            "width": 4.0,
+            "register_ids": [
+                "efedbd47-1d6d-4328-b55e-64b764d50d03",
+                "45aca534-4edf-4cf2-9834-323827ed9496"
+            ]
+        },
+        {
+            "id": "140f7c5b-236c-491e-879a-850f53208094",
+            "index": 2,
+            "x_position": -6.0,
+            "width": 4.0,
+            "register_ids": [
+                "d3c5daa4-8345-4b53-afd6-21f9061c19af"
+            ]
+        }
+    ],
+    "interface_ports": [
+        {
+            "id": "8dbae7bb-1ff6-41b5-8751-4646a95f0860",
+            "name": "in",
+            "direction": "input",
+            "data_type": "std_logic_vector",
+            "position": [
+                -25,
+                -4
+            ],
+            "internal_component_id": null,
+            "internal_port_name": null
+        },
+        {
+            "id": "7101418d-b5a5-49f7-bfb8-bfa4c1496926",
+            "name": "in1",
+            "direction": "input",
+            "data_type": "std_logic_vector",
+            "position": [
+                -25,
+                2
+            ],
+            "internal_component_id": null,
+            "internal_port_name": null
+        },
+        {
+            "id": "bbe413a3-9529-4ea0-a51a-7e6959fbb453",
+            "name": "in2",
+            "direction": "input",
+            "data_type": "std_logic_vector",
+            "position": [
+                -25,
+                9
+            ],
+            "internal_component_id": null,
+            "internal_port_name": null
+        },
+        {
+            "id": "e7120037-11ad-4c3f-b38e-ea8434763060",
+            "name": "out",
+            "direction": "output",
+            "data_type": "std_logic_vector",
+            "position": [
+                20,
+                -2
+            ],
+            "internal_component_id": null,
+            "internal_port_name": null
+        },
+        {
+            "id": "625d7b9e-05f1-47ec-a0dc-26cb6f2f8521",
+            "name": "out1",
+            "direction": "output",
+            "data_type": "std_logic_vector",
+            "position": [
+                20,
+                7
+            ],
+            "internal_component_id": null,
+            "internal_port_name": null
+        }
+    ],
+    "component_config": {
+        "enabled": false,
+        "category": "dsp",
+        "description": "",
+        "color": "#9b59b6",
+        "width": 8,
+        "height": 6
+    },
+    "visual": {
+        "width": 47,
+        "height": 28,
+        "input_stage_x": -25,
+        "output_stage_x": 22
+    },
+    "metadata": {
+        "created_at": "2026-01-23T09:12:14.774745",
+        "modified_at": "2026-01-23T14:53:18.502186",
+        "author": "",
+        "version": "1.0.0"
+    }
+}

@@ -1,12 +1,11 @@
 {
-    "name": "Adder",
-    "category": "primitives",
-    "description": "Generic adder.",
+    "name": "Adder_Carry",
+    "category": "arithmetic",
+    "description": "Generic adder with carry chain.",
     "ports": [
         {
             "name": "a",
             "direction": "in",
-            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -15,12 +14,12 @@
             "position": [
                 0,
                 2
-            ]
+            ],
+            "signal_class": "data"
         },
         {
             "name": "b",
             "direction": "in",
-            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -29,12 +28,26 @@
             "position": [
                 0,
                 4
-            ]
+            ],
+            "signal_class": "data"
+        },
+        {
+            "name": "cin",
+            "direction": "in",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                0,
+                5
+            ],
+            "signal_class": "data"
         },
         {
             "name": "sum",
             "direction": "out",
-            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH+1",
@@ -43,13 +56,28 @@
             "position": [
                 4,
                 3
-            ]
+            ],
+            "signal_class": "data"
+        },
+        {
+            "name": "cout",
+            "direction": "out",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "1",
+                "lsb": "0"
+            },
+            "position": [
+                4,
+                5
+            ],
+            "signal_class": "data"
         }
     ],
     "generics": [
         {
             "name": "WIDTH",
-            "data_type": "integer",
+            "data_type": "natural",
             "default_value": 8
         },
         {
@@ -65,6 +93,7 @@
     },
     "latency": 0,
     "behavior": {
-        "code": "return a + b"
+        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\nsum = total & ((1 << WIDTH)-1)\ncout = total >> WIDTH\nreturn sum, cout",
+        "ideal_code": "carry_in = 1.0 if cin else 0.0\nreturn float(a) + float(b) + carry_in, 0.0"
     }
 }

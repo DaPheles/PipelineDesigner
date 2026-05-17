@@ -1,6 +1,6 @@
 {
     "name": "GND",
-    "category": "primitives",
+    "category": "sources",
     "description": "",
     "ports": [
         {

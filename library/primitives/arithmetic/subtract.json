@@ -1,7 +1,7 @@
 {
-    "name": "Adder_Carry",
-    "category": "primitives",
-    "description": "Generic adder with carry chain.",
+    "name": "Subtract",
+    "category": "arithmetic",
+    "description": "Generic subtract.",
     "ports": [
         {
             "name": "a",
@@ -32,21 +32,7 @@
             "signal_class": "data"
         },
         {
-            "name": "cin",
-            "direction": "in",
-            "signal_type": {
-                "kind": "sfixed",
-                "width": "1",
-                "lsb": "0"
-            },
-            "position": [
-                0,
-                5
-            ],
-            "signal_class": "data"
-        },
-        {
-            "name": "sum",
+            "name": "diff",
             "direction": "out",
             "signal_type": {
                 "kind": "sfixed",
@@ -58,26 +44,12 @@
                 3
             ],
             "signal_class": "data"
-        },
-        {
-            "name": "cout",
-            "direction": "out",
-            "signal_type": {
-                "kind": "sfixed",
-                "width": "1",
-                "lsb": "0"
-            },
-            "position": [
-                4,
-                5
-            ],
-            "signal_class": "data"
         }
     ],
     "generics": [
         {
             "name": "WIDTH",
-            "data_type": "natural",
+            "data_type": "integer",
             "default_value": 8
         },
         {
@@ -89,11 +61,10 @@
     "visual": {
         "width": 4,
         "height": 6,
-        "color": "#ed7d31"
+        "color": "#2ec27e"
     },
     "latency": 0,
     "behavior": {
-        "code": "carry_in = 1 if cin else 0\ntotal = a + b + carry_in\nsum = total & ((1 << WIDTH)-1)\ncout = total >> WIDTH\nreturn sum, cout",
-        "ideal_code": "carry_in = 1.0 if cin else 0.0\nreturn float(a) + float(b) + carry_in, 0.0"
+        "code": "return a - b"
     }
 }

@@ -1,39 +1,26 @@
 {
-    "name": "Mux2",
-    "category": "primitives",
-    "description": "2:1 multiplexer",
+    "name": "Register",
+    "category": "storage",
+    "description": "Basic D flip-flop register with synchronous reset",
     "ports": [
         {
-            "name": "sel",
+            "name": "clk",
             "direction": "in",
+            "signal_class": "clock",
             "signal_type": {
-                "kind": "sfixed",
+                "kind": "std_logic",
                 "width": "1",
                 "lsb": "0"
             },
             "position": [
                 2,
-                0
-            ],
-            "signal_class": "data"
+                8
+            ]
         },
         {
-            "name": "a",
+            "name": "d",
             "direction": "in",
-            "signal_type": {
-                "kind": "sfixed",
-                "width": "WIDTH",
-                "lsb": "LSB"
-            },
-            "position": [
-                0,
-                2
-            ],
-            "signal_class": "data"
-        },
-        {
-            "name": "b",
-            "direction": "in",
+            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -42,12 +29,12 @@
             "position": [
                 0,
                 4
-            ],
-            "signal_class": "data"
+            ]
         },
         {
-            "name": "y",
+            "name": "q",
             "direction": "out",
+            "signal_class": "data",
             "signal_type": {
                 "kind": "sfixed",
                 "width": "WIDTH",
@@ -55,9 +42,8 @@
             },
             "position": [
                 4,
-                3
-            ],
-            "signal_class": "data"
+                4
+            ]
         }
     ],
     "generics": [
@@ -74,11 +60,11 @@
     ],
     "visual": {
         "width": 4,
-        "height": 6,
-        "color": "#70ad47"
+        "height": 8,
+        "color": "#5b9bd5"
     },
-    "latency": 0,
+    "latency": 1,
     "behavior": {
-        "code": "return a if sel else b"
+        "code": "# D flip-flop \u2014 structural semantics, not evaluated by executor.\n# DesignSimulator Phase 2 latches d\u2192q each clock edge.\nreturn d"
     }
 }

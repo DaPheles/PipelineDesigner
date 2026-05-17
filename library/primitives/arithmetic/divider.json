@@ -1,6 +1,6 @@
 {
     "name": "Divider",
-    "category": "primitives",
+    "category": "arithmetic",
     "description": "Pipelined divider.",
     "ports": [
         {
