@@ -20,8 +20,8 @@ outputs are always pre-populated before Phase 1 runs.
 
 Signal representation
 ---------------------
-Signals are ``FixedPointArray`` objects (from the fixedpoint package) or
-plain Python scalars (``float`` / ``int`` / ``bool``) for std_logic ports.
+Signals are ``FixedPoint`` scalars (from the fixedpoint package) or plain
+Python scalars (``float`` / ``int`` / ``bool``) for std_logic ports.
 Unconnected inputs are passed as ``None``; behavior code that receives
 ``None`` for a required port will raise at runtime, surfacing wiring errors.
 
@@ -40,7 +40,7 @@ from uuid import UUID
 
 import numpy as np
 
-from fixedpoint import FixedPointArray, UnquantizedResult
+from fixedpoint import FixedPoint, UnquantizedResult
 from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection
@@ -49,7 +49,7 @@ from pipeline_designer.domain.simulation.executor import BehaviorExecutor
 
 # ── Type alias ────────────────────────────────────────────────────────────────
 
-# A signal value is whatever a BehaviorExecutor returns (FixedPointArray, scalar…)
+# A signal value is whatever a BehaviorExecutor returns (FixedPoint scalar, float, bool…)
 SignalValue = Any
 
 # Signal net key: (instance_uuid, port_name)
@@ -443,9 +443,7 @@ class DesignSimulator:
             return val
         if isinstance(val, UnquantizedResult):
             return val.quantize(fmt)
-        if isinstance(val, FixedPointArray):
-            return val.requantize(fmt)
-        if isinstance(val, (int, float, np.floating, np.integer)):
+        if isinstance(val, (FixedPoint, int, float, np.floating, np.integer)):
             return fmt.quantize(np.array(float(val)))
         return val
 

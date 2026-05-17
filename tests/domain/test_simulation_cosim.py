@@ -86,18 +86,11 @@ def _connect_out(inst_id, port_name: str, iface: InterfacePort) -> Connection:
 
 
 def _quantize_for_fixed(value: float, port: InterfacePort) -> float:
-    """Pre-quantize a float to the nearest representable value for the port's format.
-
-    Returns a plain Python float that represents the closest value the port's
-    fixed-point format can hold.  The fixed-point sim uses plain floats as
-    inputs; output quantization is handled by DesignSimulator._quantize_signal.
-    """
+    """Pre-quantize a float to the nearest representable value for the port's format."""
     if port.signal_type is None:
         return float(value)
     try:
-        fmt = port.signal_type.to_fpformat()
-        fp = fmt.quantize(np.array(float(value)))
-        return float(fp.values)
+        return float(port.signal_type.to_fpformat().quantize(np.array(float(value))))
     except Exception:
         return float(value)
 
@@ -106,11 +99,10 @@ def _to_float(v) -> float | None:
     """Extract a plain Python float from any simulator output value."""
     if v is None:
         return None
-    if hasattr(v, 'values'):       # FixedPointArray
-        return float(np.asarray(v.values).flat[0])
-    if hasattr(v, 'keep_full'):    # UnquantizedResult (fallback — should not occur)
-        return float(np.asarray(v.keep_full().values).flat[0])
-    return float(np.asarray(v).flat[0])
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _run_both(design: Design, library: dict, inputs: dict, n_cycles: int = 1):
@@ -303,15 +295,11 @@ class TestFpS2U:
     """
 
     _CODE = (
-        "q_fmt   = UFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\n"
-        "q_min   = q_fmt.real_min\n"
-        "q_max   = q_fmt.real_max\n"
-        "a_real  = a.values.flat[0] if isinstance(a, FixedPointArray) else float(a)\n"
-        "clamped = q_min if a_real <= q_min else q_max if a_real >= q_max else a_real\n"
-        "result  = clamped if CLAMP_EN else a_real\n"
-        "if isinstance(a, FixedPointArray):\n"
-        "    return q_fmt.quantize(np.array(float(result)))\n"
-        "return result\n"
+        "q_fmt  = UFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\n"
+        "a_real = float(a)\n"
+        "if CLAMP_EN:\n"
+        "    a_real = max(q_fmt.real_min, min(q_fmt.real_max, a_real))\n"
+        "return q_fmt.quantize(np.array(a_real))\n"
     )
 
     def _make(self, q_width: int = 8, q_lsb: int = -6, clamp: int = 1):
@@ -456,15 +444,11 @@ class TestFpS2SNarrowOutput:
     """FP_S2S with narrow output: float keeps full value, fixed saturates."""
 
     _CODE = (
-        "q_fmt   = SFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\n"
-        "q_min   = q_fmt.real_min\n"
-        "q_max   = q_fmt.real_max\n"
-        "a_real  = a.values.flat[0] if isinstance(a, FixedPointArray) else float(a)\n"
-        "clamped = q_min if a_real <= q_min else q_max if a_real >= q_max else a_real\n"
-        "result  = clamped if CLAMP_EN else a_real\n"
-        "if isinstance(a, FixedPointArray):\n"
-        "    return q_fmt.quantize(np.array(float(result)))\n"
-        "return result\n"
+        "q_fmt  = SFixed(Q_WIDTH + Q_LSB - 1, Q_LSB)\n"
+        "a_real = float(a)\n"
+        "if CLAMP_EN:\n"
+        "    a_real = max(q_fmt.real_min, min(q_fmt.real_max, a_real))\n"
+        "return q_fmt.quantize(np.array(a_real))\n"
     )
 
     def _make(self):

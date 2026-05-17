@@ -11,7 +11,7 @@ Simulation modes
 
   Fixed-point     — inputs are quantized to the interface port's sfixed/ufixed
                     format before being passed to the simulator.  Behavior code
-                    then operates on FixedPointArray objects.
+                    then operates on FixedPoint scalars.
 
   Co-simulation   — runs both modes in the same step and displays the
                     fixed-point output alongside the ideal float output so the

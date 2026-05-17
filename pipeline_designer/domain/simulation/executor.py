@@ -13,7 +13,7 @@ Const(fmt, value)  -> FixedPointArray scalar (0-d)
 truncate / round_half_up / round_half_even / round_away  (RoundMode strings)
 wrap / saturate / assert_no_overflow                     (SaturateMode strings)
 FPFormat / FixedPoint / FixedPointArray / UnquantizedResult  (types)
-np                                                       (numpy)
+np                                                           (numpy)
 
 Float / ideal mode
 ------------------
@@ -31,8 +31,8 @@ The code body is compiled as the body of:
         <code>
 
 The architect's code may use any of the namespace symbols.  Ports arrive as
-FixedPointArray objects (or plain numpy scalars for scalar port types) and the
-function must return the same.
+``FixedPoint`` scalars (or plain Python ``float`` for non-fixed-point ports)
+and the function must return a ``FixedPoint`` or ``UnquantizedResult``.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _bits(n: int) -> FPFormat:
     return FPFormat(int_bits=n, frac_bits=0, signed=False)
 
 
-def _const(fmt: FPFormat, value: float) -> FixedPointArray:
+def _const(fmt: FPFormat, value: float) -> FixedPoint:
     """Scalar fixed-point constant quantized to fmt."""
     return fmt.quantize(np.array(value))
 
