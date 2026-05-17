@@ -1,0 +1,80 @@
+{
+    "name": "Mult_Comb",
+    "category": "unit",
+    "description": "Multiplier. SIG_TYPE controls signed/unsigned interpretation.",
+    "ports": [
+        {
+            "name": "a",
+            "direction": "in",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "A_WIDTH",
+                "lsb": "LSB"
+            },
+            "position": [
+                0,
+                2
+            ]
+        },
+        {
+            "name": "b",
+            "direction": "in",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "B_WIDTH",
+                "lsb": "LSB"
+            },
+            "position": [
+                0,
+                4
+            ]
+        },
+        {
+            "name": "prod",
+            "direction": "out",
+            "signal_class": "data",
+            "signal_type": {
+                "kind": "sfixed",
+                "width": "PROD_WIDTH",
+                "lsb": "LSB"
+            },
+            "position": [
+                4,
+                3
+            ]
+        }
+    ],
+    "generics": [
+        {
+            "name": "A_WIDTH",
+            "data_type": "integer",
+            "default_value": 18
+        },
+        {
+            "name": "B_WIDTH",
+            "data_type": "integer",
+            "default_value": 18
+        },
+        {
+            "name": "PROD_WIDTH",
+            "data_type": "integer",
+            "default_value": 36
+        },
+        {
+            "name": "LSB",
+            "data_type": "integer",
+            "default_value": 0
+        }
+    ],
+    "visual": {
+        "width": 4,
+        "height": 6,
+        "color": "#2040f0"
+    },
+    "latency": 0,
+    "behavior": {
+        "code": "return a * b"
+    }
+}

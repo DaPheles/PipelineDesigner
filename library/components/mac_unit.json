@@ -4,50 +4,138 @@
     {
       "id": "a0ac0001-0001-0001-0001-000000000001",
       "definition_ref": "Adder",
-      "position": [-4, -4],
+      "position": [
+        -4.0,
+        -5.0
+      ],
       "generic_values": {
-        "WIDTH": 16
+        "WIDTH": 18,
+        "LSB": "LSB"
       },
       "pipeline_stage": null,
       "instance_name": "multiplier",
       "is_composite": false,
-      "stage_count": 1
+      "stage_count": 1,
+      "alignment_index": 0,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
     },
     {
       "id": "a0ac0002-0002-0002-0002-000000000002",
       "definition_ref": "Register",
-      "position": [3, -6],
+      "position": [
+        3.0,
+        -6.0
+      ],
       "generic_values": {
-        "WIDTH": 16
+        "WIDTH": 19,
+        "LSB": "LSB"
       },
       "pipeline_stage": 1,
       "instance_name": "mult_reg",
       "is_composite": false,
-      "stage_count": 1
+      "stage_count": 1,
+      "alignment_index": 0,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
     },
     {
       "id": "a0ac0003-0003-0003-0003-000000000003",
       "definition_ref": "Adder",
-      "position": [10, 3],
+      "position": [
+        24.0,
+        2.0
+      ],
       "generic_values": {
-        "WIDTH": 16
+        "WIDTH": 48,
+        "LSB": "LSB"
       },
       "pipeline_stage": null,
       "instance_name": "accumulator",
       "is_composite": false,
-      "stage_count": 1
+      "stage_count": 1,
+      "alignment_index": 2,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
     },
     {
       "id": "a0ac0004-0004-0004-0004-000000000004",
       "definition_ref": "Register",
-      "position": [18, 1],
+      "position": [
+        31.0,
+        1.0
+      ],
       "generic_values": {
         "WIDTH": 16
       },
-      "pipeline_stage": 2,
+      "pipeline_stage": 3,
       "instance_name": "acc_reg",
       "is_composite": false,
-      "stage_count": 1
+      "stage_count": 1,
+      "alignment_index": 0,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
+    },
+    {
+      "id": "1076b1ee-7998-493f-9399-a58dbebb73ab",
+      "definition_ref": "Register",
+      "position": [
+        3.0,
+        5.0
+      ],
+      "generic_values": {
+        "WIDTH": 18,
+        "LSB": "LSB"
+      },
+      "pipeline_stage": 1,
+      "instance_name": null,
+      "is_composite": false,
+      "stage_count": 1,
+      "alignment_index": 0,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
+    },
+    {
+      "id": "97e37776-fee8-4602-a507-4eae0ebd3152",
+      "definition_ref": "Register",
+      "position": [
+        17.0,
+        1.0
+      ],
+      "generic_values": {
+        "WIDTH": 48,
+        "LSB": "LSB"
+      },
+      "pipeline_stage": 2,
+      "instance_name": null,
+      "is_composite": false,
+      "stage_count": 1,
+      "alignment_index": 0,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
+    },
+    {
+      "id": "8e087e0d-30fb-44b8-b47b-2af69cb8c2a1",
+      "definition_ref": "Mult_Comb",
+      "position": [
+        10.0,
+        0.0
+      ],
+      "generic_values": {},
+      "pipeline_stage": null,
+      "instance_name": null,
+      "is_composite": false,
+      "stage_count": 1,
+      "alignment_index": 1,
+      "stage_position_offset": 0.0,
+      "is_position_temporary": false,
+      "port_signal_classes": {}
     }
   ],
   "connections": [
@@ -64,21 +152,6 @@
         "interface_port_id": null
       },
       "signal_name": "mult_result",
-      "waypoints": []
-    },
-    {
-      "id": "c00aa002-0002-0002-0002-000000000002",
-      "source": {
-        "component_id": "a0ac0002-0002-0002-0002-000000000002",
-        "port_name": "q",
-        "interface_port_id": null
-      },
-      "target": {
-        "component_id": "a0ac0003-0003-0003-0003-000000000003",
-        "port_name": "a",
-        "interface_port_id": null
-      },
-      "signal_name": "mult_piped",
       "waypoints": []
     },
     {
@@ -142,15 +215,150 @@
       "waypoints": []
     },
     {
-      "id": "5d0d31fa-5ab8-4e75-b7b2-bcbd8fbbe81d",
+      "id": "70743d89-16b7-46a7-b166-99b8956ae7c9",
       "source": {
         "component_id": null,
         "port_name": "b",
         "interface_port_id": "100a0002-0002-0002-0002-000000000002"
       },
       "target": {
+        "component_id": "1076b1ee-7998-493f-9399-a58dbebb73ab",
+        "port_name": "d",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "e7b61476-21ce-4c3f-abc0-dcf939d31d07",
+      "source": {
+        "component_id": "97e37776-fee8-4602-a507-4eae0ebd3152",
+        "port_name": "q",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "a0ac0003-0003-0003-0003-000000000003",
+        "port_name": "a",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "9b7d8b5f-fe81-4b8a-b3a4-e65378deda2f",
+      "source": {
+        "component_id": null,
+        "port_name": "clk",
+        "interface_port_id": "100a0004-0004-0004-0004-000000000004"
+      },
+      "target": {
+        "component_id": "a0ac0002-0002-0002-0002-000000000002",
+        "port_name": "clk",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "5f5ea617-7b64-4058-a4d6-92ad3a15459a",
+      "source": {
+        "component_id": null,
+        "port_name": "clk",
+        "interface_port_id": "100a0004-0004-0004-0004-000000000004"
+      },
+      "target": {
+        "component_id": "1076b1ee-7998-493f-9399-a58dbebb73ab",
+        "port_name": "clk",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "b3c64548-a040-458b-902a-d6efa3107272",
+      "source": {
+        "component_id": null,
+        "port_name": "clk",
+        "interface_port_id": "100a0004-0004-0004-0004-000000000004"
+      },
+      "target": {
+        "component_id": "97e37776-fee8-4602-a507-4eae0ebd3152",
+        "port_name": "clk",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "2fc4d9a3-3263-40bf-a4d3-142c89157068",
+      "source": {
+        "component_id": null,
+        "port_name": "clk",
+        "interface_port_id": "100a0004-0004-0004-0004-000000000004"
+      },
+      "target": {
+        "component_id": "a0ac0004-0004-0004-0004-000000000004",
+        "port_name": "clk",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "d61b1b3e-a478-42a4-85b0-507ce7ef0fb2",
+      "source": {
+        "component_id": null,
+        "port_name": "c",
+        "interface_port_id": "784fde32-a14c-4556-b66b-7379331dfaf5"
+      },
+      "target": {
         "component_id": "a0ac0003-0003-0003-0003-000000000003",
         "port_name": "b",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "f3862bbc-d994-4391-8255-e60eeeeb2b7c",
+      "source": {
+        "component_id": "a0ac0002-0002-0002-0002-000000000002",
+        "port_name": "q",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "8e087e0d-30fb-44b8-b47b-2af69cb8c2a1",
+        "port_name": "a",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "e9a765d2-7ede-4929-b226-190962d5e8af",
+      "source": {
+        "component_id": "1076b1ee-7998-493f-9399-a58dbebb73ab",
+        "port_name": "q",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "8e087e0d-30fb-44b8-b47b-2af69cb8c2a1",
+        "port_name": "b",
+        "interface_port_id": null
+      },
+      "signal_name": null,
+      "waypoints": []
+    },
+    {
+      "id": "477cc913-970e-4459-a8c1-f411e1687ac8",
+      "source": {
+        "component_id": "8e087e0d-30fb-44b8-b47b-2af69cb8c2a1",
+        "port_name": "prod",
+        "interface_port_id": null
+      },
+      "target": {
+        "component_id": "97e37776-fee8-4602-a507-4eae0ebd3152",
+        "port_name": "d",
         "interface_port_id": null
       },
       "signal_name": null,
@@ -161,29 +369,69 @@
     {
       "id": "66eafdcd-d23f-4a6d-bdc2-633dff9f9f53",
       "index": 1,
-      "x_position": 3,
-      "width": 4,
+      "x_position": 3.0,
+      "width": 4.0,
       "register_ids": [
-        "a0ac0002-0002-0002-0002-000000000002"
-      ]
+        "a0ac0002-0002-0002-0002-000000000002",
+        "1076b1ee-7998-493f-9399-a58dbebb73ab"
+      ],
+      "additional_offset": 0.0
     },
     {
-      "id": "500a0002-0002-0002-0002-000000000002",
+      "id": "10415c5a-b341-422f-aad4-76227c00b5a6",
       "index": 2,
-      "x_position": 18,
-      "width": 4,
+      "x_position": 17.0,
+      "width": 4.0,
+      "register_ids": [
+        "97e37776-fee8-4602-a507-4eae0ebd3152"
+      ],
+      "additional_offset": 0.0
+    },
+    {
+      "id": "cc37dabf-97c9-4f49-aea4-812532dd6fe2",
+      "index": 3,
+      "x_position": 31.0,
+      "width": 4.0,
       "register_ids": [
         "a0ac0004-0004-0004-0004-000000000004"
-      ]
+      ],
+      "additional_offset": 0.0
     }
   ],
   "interface_ports": [
     {
+      "id": "100a0004-0004-0004-0004-000000000004",
+      "name": "clk",
+      "direction": "input",
+      "data_type": "std_logic",
+      "signal_type": {
+        "kind": "ufixed",
+        "width": "16",
+        "lsb": "-8"
+      },
+      "position": [
+        -10,
+        1
+      ],
+      "signal_class": "clock",
+      "internal_component_id": null,
+      "internal_port_name": null
+    },
+    {
       "id": "100a0001-0001-0001-0001-000000000001",
       "name": "a",
       "direction": "input",
-      "data_type": "std_logic_vector",
-      "position": [-10, -8],
+      "data_type": "sfixed",
+      "signal_type": {
+        "kind": "sfixed",
+        "width": "18",
+        "lsb": "LSB"
+      },
+      "position": [
+        -10,
+        7
+      ],
+      "signal_class": "data",
       "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
       "internal_port_name": "a"
     },
@@ -191,44 +439,71 @@
       "id": "100a0002-0002-0002-0002-000000000002",
       "name": "b",
       "direction": "input",
-      "data_type": "std_logic_vector",
-      "position": [-9, -3],
+      "data_type": "sfixed",
+      "signal_type": {
+        "kind": "sfixed",
+        "width": "18",
+        "lsb": "LSB"
+      },
+      "position": [
+        -10,
+        20
+      ],
+      "signal_class": "data",
       "internal_component_id": "a0ac0001-0001-0001-0001-000000000001",
       "internal_port_name": "b"
     },
     {
-      "id": "100a0003-0003-0003-0003-000000000003",
-      "name": "acc_in",
+      "id": "784fde32-a14c-4556-b66b-7379331dfaf5",
+      "name": "c",
       "direction": "input",
-      "data_type": "std_logic_vector",
-      "position": [-10, 0],
+      "data_type": "sfixed",
+      "signal_type": {
+        "kind": "sfixed",
+        "width": "48",
+        "lsb": "LSB"
+      },
+      "position": [
+        -10,
+        27
+      ],
+      "signal_class": "data",
+      "internal_component_id": null,
+      "internal_port_name": null
+    },
+    {
+      "id": "100a0003-0003-0003-0003-000000000003",
+      "name": "pre_add",
+      "direction": "input",
+      "data_type": "sfixed",
+      "signal_type": {
+        "kind": "sfixed",
+        "width": "18",
+        "lsb": "LSB"
+      },
+      "position": [
+        -10,
+        11
+      ],
+      "signal_class": "data",
       "internal_component_id": "a0ac0003-0003-0003-0003-000000000003",
       "internal_port_name": "b"
     },
     {
-      "id": "100a0004-0004-0004-0004-000000000004",
-      "name": "clk",
-      "direction": "input",
-      "data_type": "std_logic",
-      "position": [-10, 5],
-      "internal_component_id": null,
-      "internal_port_name": null
-    },
-    {
-      "id": "100a0005-0005-0005-0005-000000000005",
-      "name": "rst",
-      "direction": "input",
-      "data_type": "std_logic",
-      "position": [-10, 9],
-      "internal_component_id": null,
-      "internal_port_name": null
-    },
-    {
       "id": "000a0001-0001-0001-0001-000000000001",
-      "name": "result",
+      "name": "q",
       "direction": "output",
-      "data_type": "std_logic_vector",
-      "position": [24, 0],
+      "data_type": "sfixed",
+      "signal_type": {
+        "kind": "sfixed",
+        "width": "16",
+        "lsb": "-8"
+      },
+      "position": [
+        42,
+        16
+      ],
+      "signal_class": "data",
       "internal_component_id": "a0ac0004-0004-0004-0004-000000000004",
       "internal_port_name": "q"
     }
@@ -239,17 +514,25 @@
     "description": "2-stage pipelined multiply-accumulate unit",
     "color": "#e74c3c",
     "width": 10,
-    "height": 8
+    "height": 8,
+    "generics": [
+      {
+        "name": "LSB",
+        "data_type": "integer",
+        "default_value": 0,
+        "options": null
+      }
+    ]
   },
   "visual": {
-    "width": 35,
-    "height": 25,
-    "input_stage_x": -9,
-    "output_stage_x": 26
+    "width": 52,
+    "height": 29,
+    "input_stage_x": -11,
+    "output_stage_x": 41
   },
   "metadata": {
     "created_at": "2024-01-01T00:00:00",
-    "modified_at": "2026-01-23T10:00:00",
+    "modified_at": "2026-05-17T11:42:44.453524",
     "author": "Pipeline Designer",
     "version": "1.0.0"
   }
