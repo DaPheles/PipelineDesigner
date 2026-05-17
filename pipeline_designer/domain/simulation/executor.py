@@ -12,7 +12,7 @@ Bits(n)            -> FPFormat (n-bit unsigned std_logic_vector)
 Const(fmt, value)  -> FixedPointArray scalar (0-d)
 truncate / round_half_up / round_half_even / round_away  (RoundMode strings)
 wrap / saturate / assert_no_overflow                     (SaturateMode strings)
-FPFormat / FixedPointArray / UnquantizedResult           (types)
+FPFormat / FixedPoint / FixedPointArray / UnquantizedResult  (types)
 np                                                       (numpy)
 
 Float / ideal mode
@@ -44,7 +44,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from fixedpoint import FPFormat, FixedPointArray, UnquantizedResult
+from fixedpoint import FPFormat, FixedPoint, FixedPointArray, UnquantizedResult
 
 
 # ── Namespace factories ──────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ class SimNamespace(dict):
             "Const":    _const,
             # raw types — useful for isinstance checks in behavior code
             "FPFormat":          FPFormat,
+            "FixedPoint":        FixedPoint,
             "FixedPointArray":   FixedPointArray,
             "UnquantizedResult": UnquantizedResult,
             # rounding mode strings (match fixedpoint.quant.RoundMode)
