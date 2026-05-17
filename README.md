@@ -1,6 +1,29 @@
 # Pipeline Designer
 
-A graphical tool for designing cycle-accurate FPGA/ASIC pipelines. Draw component graphs, define pipeline stages, simulate behavior with fixed-point arithmetic, and export synthesizable VHDL.
+> *"I have been designing FPGAs professionally for over 25 years. Throughout that time I searched for a tool that matches the way I actually think about pipelines — something that lets me sketch an idea visually, refine it iteratively, and verify the approach before writing a single line of HDL. That tool did not exist. So I built it."*
+
+Pipeline Designer is a graphical environment for architects and engineers who design cycle-accurate FPGA and ASIC pipelines. It is built around a single belief: **the best designs begin as rough ideas made visible**, then deepen through iteration, simulation, and refinement — not through upfront specification.
+
+The workflow is intentionally light:
+
+1. **Draft** — drag primitive building blocks onto a canvas and connect their ports to form a pipeline graph.
+2. **Simulate** — run a cycle-accurate simulation directly in the tool to verify that the signal flow behaves as expected, without writing any testbench code.
+3. **Refine** — adjust widths, pipeline depth, and structure; simulate again; repeat until the architecture is sound.
+4. **Export** — generate structural VHDL as a starting point for implementation.
+
+Each primitive unit carries its own functional behavior expressed as executable pseudo-code. The simulator combines these behaviors across the graph, propagating fixed-point values cycle by cycle. You can verify arithmetic precision, pipeline latency, and signal routing early — at the architectural level, not after implementation.
+
+---
+
+> **Current status:** This is early-stage software. The core features — graphical editing, simulation, composite components, VHDL export, and the library system — are functional. Robustness, error handling, and polish are ongoing work. The tool is suitable for educational exploration and for experienced designers who prefer this style of thinking. Expect rough edges.
+
+---
+
+## Who This Is For
+
+- **FPGA and ASIC architects** who think spatially about pipeline structure before writing HDL.
+- **Students and educators** looking for a visual way to understand pipelining, fixed-point arithmetic, and dataflow composition.
+- **Engineers prototyping DSP algorithms** who want to explore structure and verify numerical behavior before committing to RTL.
 
 ---
 
@@ -28,9 +51,12 @@ A graphical tool for designing cycle-accurate FPGA/ASIC pipelines. Draw componen
 - **Undo/redo** — all canvas mutations go through a `Command` pattern stack
 - **Cycle-accurate simulation** — two-phase (combinational + clocked capture) simulator evaluates the full design graph; results are shown as waveforms
 - **Fixed-point arithmetic** — port types are expressed as `sfixed`/`ufixed`/`std_logic_vector` with MSB/LSB expressions; the simulator uses the bundled `fixedpoint` package
-- **VHDL generation** — generates synthesizable entity + architecture plus a self-checking GHDL testbench from Python golden values
+- **Executable primitive behavior** — each primitive carries Python pseudo-code that the simulator executes directly; behaviors compose naturally across the graph
+- **VHDL generation** — generates a synthesizable entity + architecture and a self-checking GHDL testbench from Python golden simulation values
 - **Property editor** — click any component, port, or interface port to inspect and edit its properties in a docked panel
 - **Primitive editor** — a separate window for creating and editing leaf-level component definitions, including port tables, generic tables, and behavior code
+- **Categorised component library** — primitives and composite components are organised into named categories stored as subdirectories; the palette displays them in collapsible groups
+- **Extensible library** — additional library roots can be added at runtime (Library → Add User Library) to support project-specific or team-shared component sets
 
 ---
 
@@ -46,10 +72,12 @@ pipeline_designer/
 │   └── simulation/     — BehaviorExecutor, DesignSimulator, VhdlGenerator
 ├── infrastructure/
 │   └── persistence/
-│       └── library_loader.py  — Loads primitives + composite designs from JSON
+│       ├── library_loader.py    — Loads primitives + composite designs from JSON
+│       └── category_manager.py — Filesystem operations for category directories
 ├── presentation/
 │   ├── canvas/         — DesignScene (QGraphicsScene) + items + commands
 │   ├── panels/         — PropertyEditor, ComponentPalette (docked panels)
+│   ├── dialogs/        — CategoryManagerDialog and other shared dialogs
 │   ├── primitive_editor/ — Standalone window for editing primitives
 │   ├── simulation/     — DesignSimulationPanel (waveform display)
 │   └── shared/         — WaveformWidget
@@ -81,7 +109,7 @@ The reusable type definition for a leaf primitive or composite component.
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | `str` | Unique identifier used as library key |
-| `category` | `str` | Palette grouping |
+| `category` | `str` | Palette grouping (authoritative source is the directory name on disk) |
 | `ports` | `list[Port]` | Port specifications in grid-unit positions |
 | `generics` | `list[Generic]` | Parameterised widths/types |
 | `visual` | `VisualConfig` | Width, height (grid units), color |
@@ -212,24 +240,63 @@ Every `Port` and `InterfacePort` carries a `PortSignalClass`:
 
 ## Library and File Formats
 
-### Primitives — `library/primitives/*.json`
+### Directory layout
+
+The library is organised into type directories and category subdirectories:
+
+```
+library/
+├── primitives/
+│   ├── arithmetic/        — adder, subtractor, multiplier, divider, …
+│   ├── dsp/               — fir4tap, …
+│   ├── fixed_point/       — fp_s2s, fp_u2u, type converters, …
+│   ├── logic/             — mux2, …
+│   ├── sources/           — gnd, …
+│   └── storage/           — register, …
+└── components/
+    ├── arithmetic/        — pipelined_adder, …
+    └── dsp/               — mac_unit, …
+```
+
+The **directory name is the authoritative category**. The `category` field inside a JSON file is updated to match whenever a file is moved or a category is renamed, but on load the directory name always wins.
+
+Additional library roots (user or project libraries) can be registered through **Library → Add User Library**. They follow the same layout and are scanned after the built-in library; later roots shadow earlier ones on name collision.
+
+### Category administration
+
+Use **Library → Manage Categories** to create, rename, or delete categories. Categories are plain directories — this dialog is the safe way to mutate them, because it also updates the `category` field inside every affected JSON file.
+
+Avoid creating or renaming category directories by hand; the JSON fields will become stale.
+
+### Primitives — `library/primitives/<category>/<name>.json`
 
 Leaf `ComponentDefinition` objects. Direct fields: `name`, `category`, `ports`, `generics`, `visual`, `latency`, `behavior`. Loaded by `LibraryLoader._load_component_file()`.
 
-### Designs — `library/components/*.json` or user files
+Each primitive carries a `behavior.code` block — a Python function body that the simulator executes. This is the executable pseudo-code that makes simulation possible without writing testbenches. Example (adder):
+
+```python
+return a + b
+```
+
+For a register (`d`, `q`, `clk` ports), the simulator's two-phase model handles the latch — `return d` is correct; Phase 2 promotes D to Q.
+
+### Designs — `library/components/<category>/<name>.json` or user files
 
 `Design` objects: instances + connections + stages + interface ports. A design with `component_config.enabled = true` is also exported as a composite `ComponentDefinition` by `LibraryLoader._load_composite_component()`.
 
-**`_load_from_file` always parses as `Design`.** It cannot open primitive JSON — Pydantic silently discards primitive-only fields. There is no primitive editor file-open flow.
+**`_load_from_file` always parses as `Design`.** It cannot open primitive JSON — Pydantic silently discards primitive-only fields. There is no primitive-file open flow in the main editor.
 
 ### Library loading
 
 ```python
-loader = LibraryLoader(paths=[...])
-library: dict[str, ComponentDefinition] = loader.load_all()
+loader = LibraryLoader(library_path, extra_roots=[user_lib_path])
+loader.load_all()
+
+primitives: list[ComponentDefinition] = loader.get_primitives()
+composites: list[ComponentDefinition] = loader.get_composites()
 ```
 
-Both primitives and enabled composites appear as `ComponentDefinition` in the flat `library` dict. Use `loader.is_composite(name)` and `loader.get_composite_design(name)` to distinguish them when needed.
+Both lists surface as `ComponentDefinition` to the palette and scene. Use `loader.is_composite(name)` and `loader.get_composite_design(name)` to distinguish them when the internal structure matters (e.g., simulation, VHDL export).
 
 ---
 
@@ -281,7 +348,7 @@ gen = VhdlGenerator(design, library)
 gen.write(output_dir)
 ```
 
-See `examples/fir4_vhdl_export.py` for a complete worked example.
+The exported VHDL is structural — it reflects the component graph as drawn. It is intended as a clean starting point for implementation, not as production-ready code. See `examples/fir4_vhdl_export.py` for a worked example.
 
 ---
 
@@ -326,7 +393,7 @@ The application has three distinct test layers. Each targets a different part of
 
 These are the fastest, most reliable tests. `domain/` has zero Qt dependencies — any Pydantic model or simulation class can be instantiated and asserted on directly.
 
-- refer to 'tests/test_domain_models.py'
+- refer to `tests/test_domain_models.py`
 
 ### Layer 2 — Scene logic tests (headless Qt, no display)
 
@@ -346,13 +413,13 @@ def qapp():
     yield app
 ```
 
-- refer to 'tests/test_scene.py'
+- refer to `tests/test_scene.py`
 
 ### Layer 3 — UI interaction tests (pytest-qt)
 
 `pytest-qt` provides `qtbot`, which simulates mouse/keyboard events and waits for Qt signals. Install with `pip install pytest-qt`.
 
-- refer to 'tests/test_ui_interactions.py'
+- refer to `tests/test_ui_interactions.py`
 
 ### Recommended directory layout
 
@@ -393,5 +460,5 @@ QT_QPA_PLATFORM=offscreen pytest --cov=pipeline_designer --cov-report=term-missi
 - **Domain tests need no fixtures** — instantiate models directly; they are plain Pydantic objects.
 - **Scene tests need `qapp`** — one session-scoped `QApplication` is sufficient; create a fresh `DesignScene` per test.
 - **UI tests use `qtbot.waitSignal`** — never `time.sleep`; let Qt's event loop process events naturally.
-- **Test the contract, not the implementation** — assert on `Design` state and emitted signals, not on internal `_` attributes. The one exception is `_port_items` and `_component_items` dicts, which are the natural access path for scene item tests.
+- **Test the contract, not the implementation** — assert on `Design` state and emitted signals, not on internal `_` attributes.
 - **Simulation tests are pure Python** — `DesignSimulator` has no Qt dependency; test combinational and registered paths independently.
