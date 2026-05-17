@@ -40,7 +40,7 @@ from uuid import UUID
 
 import numpy as np
 
-from fixedpoint import FixedPoint, UnquantizedResult
+from pipeline_designer.utils.fixedpoint import FixedPoint, UnquantizedResult
 from pipeline_designer.domain.models.component import ComponentDefinition, PortSignalClass
 from pipeline_designer.domain.models.design import Design
 from pipeline_designer.domain.models.instance import InterfaceDirection

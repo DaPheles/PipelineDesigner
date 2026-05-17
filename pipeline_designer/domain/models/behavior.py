@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from fixedpoint import FPFormat
+    from pipeline_designer.utils.fixedpoint import FPFormat
 
 
 # ── Safe integer-expression evaluator ────────────────────────────────────────
@@ -306,7 +306,7 @@ class SignalType(BaseModel):
         Raises ``TypeError`` for scalar kinds, ``ValueError`` for unresolvable
         generic expressions.
         """
-        from fixedpoint import FPFormat  # late import — optional dependency
+        from pipeline_designer.utils.fixedpoint import FPFormat  # late import — optional dependency
 
         g = generics or {}
         k = self.resolved_kind(g)

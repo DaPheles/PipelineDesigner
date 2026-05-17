@@ -44,7 +44,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from fixedpoint import FPFormat, FixedPoint, FixedPointArray, UnquantizedResult
+from pipeline_designer.utils.fixedpoint import FPFormat, FixedPoint, FixedPointArray, UnquantizedResult
 
 
 # ── Namespace factories ──────────────────────────────────────────────────────

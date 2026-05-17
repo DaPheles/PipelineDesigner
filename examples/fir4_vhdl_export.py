@@ -28,7 +28,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from fixedpoint import FPFormat, FixedPointArray  # noqa: E402
+from pipeline_designer.utils.fixedpoint import FPFormat, FixedPointArray  # noqa: E402
 from pipeline_designer.domain.models.behavior import ComponentBehavior  # noqa: E402
 from pipeline_designer.domain.models.component import ComponentDefinition  # noqa: E402
 from pipeline_designer.domain.simulation import (  # noqa: E402
