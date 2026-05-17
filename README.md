@@ -365,7 +365,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # Run the application
-python3 -m pipeline_designer.main
+python3 PipelineDesigner.py
 
 # Run tests
 pytest
