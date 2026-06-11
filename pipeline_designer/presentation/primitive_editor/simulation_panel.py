@@ -451,53 +451,45 @@ class SimulationPanel(QWidget):
         float_outputs: dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
         fp_outputs:    dict[str, list[Any | None]] = {p.name: [] for p in out_ports}
 
-        port_names_lower = {p.name.lower() for p in self._ports}
-        is_register = {"d", "q", "clk"}.issubset(port_names_lower)
+        code = self._behavior_getter().strip()
+        if not code:
+            self._show_error("No behavior code to simulate.")
+            return
 
-        if is_register:
-            self._fill_register_outputs(float_inputs, float_outputs, sim_generics)
-            self._fill_register_outputs(fp_inputs, fp_outputs, sim_generics)
-        else:
-            code = self._behavior_getter().strip()
-            if not code:
-                self._show_error("No behavior code to simulate.")
-                return
+        exec_ports = [p for p in in_ports if p.signal_class != PortSignalClass.RESET]
 
-            exec_ports = [p for p in in_ports if p.signal_class != PortSignalClass.RESET]
-            is_stateful = "state" in code
+        # Float/ideal executor: use ideal_code when available, otherwise
+        # run the same code under FloatSimNamespace (quantize → identity).
+        ideal_code = self._ideal_code_getter()
+        try:
+            executor_float = BehaviorExecutor(
+                code_body=ideal_code if ideal_code else code,
+                param_names=[p.name for p in exec_ports],
+                name="sim_float",
+                extra_ns=sim_generics,
+                float_mode=True,
+            )
+        except Exception as exc:
+            self._show_error(f"Compile error (float):\n{exc}")
+            return
 
-            # Float/ideal executor: use ideal_code when available, otherwise
-            # run the same code under FloatSimNamespace (quantize → identity).
-            ideal_code = self._ideal_code_getter()
-            try:
-                executor_float = BehaviorExecutor(
-                    code_body=ideal_code if ideal_code else code,
-                    param_names=[p.name for p in exec_ports],
-                    name="sim_float",
-                    extra_ns=sim_generics,
-                    float_mode=True,
-                )
-            except Exception as exc:
-                self._show_error(f"Compile error (float):\n{exc}")
-                return
+        self._run_executor(executor_float, exec_ports, float_inputs, float_outputs, out_ports)
 
-            self._run_executor(executor_float, exec_ports, float_inputs, float_outputs, out_ports, is_stateful)
-
-            # Fixed-point executor: original code with real fixedpoint namespace.
-            try:
-                executor_fixed = BehaviorExecutor(
-                    code_body=code,
-                    param_names=[p.name for p in exec_ports],
-                    name="sim_fixed",
-                    extra_ns=sim_generics,
-                    float_mode=False,
-                )
-                self._run_executor(executor_fixed, exec_ports, fp_inputs, fp_outputs, out_ports, is_stateful)
-            except Exception:
-                # If the fixed executor fails to compile (e.g. bit-op-only code),
-                # fill with None so the float lane still shows.
-                for port in out_ports:
-                    fp_outputs[port.name] = [None] * self._n_cycles
+        # Fixed-point executor: original code with real fixedpoint namespace.
+        try:
+            executor_fixed = BehaviorExecutor(
+                code_body=code,
+                param_names=[p.name for p in exec_ports],
+                name="sim_fixed",
+                extra_ns=sim_generics,
+                float_mode=False,
+            )
+            self._run_executor(executor_fixed, exec_ports, fp_inputs, fp_outputs, out_ports)
+        except Exception:
+            # If the fixed executor fails to compile (e.g. bit-op-only code),
+            # fill with None so the float lane still shows.
+            for port in out_ports:
+                fp_outputs[port.name] = [None] * self._n_cycles
 
         # Build wave signals — inputs as plain lanes, outputs as combined
         # (float_val, fixed_val) tuples matching the design simulation panel.
@@ -542,10 +534,9 @@ class SimulationPanel(QWidget):
         input_vals: dict[str, list[Any | None]],
         output_vals: dict[str, list[Any | None]],
         out_ports: list[Port],
-        is_stateful: bool,
     ) -> None:
         for cyc in range(self._n_cycles):
-            src = cyc if is_stateful else (cyc - self._latency)
+            src = cyc - self._latency
             if src < 0:
                 for port in out_ports:
                     output_vals[port.name].append(None)
@@ -578,44 +569,6 @@ class SimulationPanel(QWidget):
                 self._show_error(f"Cycle {cyc}: {exc}")
                 for port in out_ports:
                     output_vals[port.name].append(None)
-
-    def _fill_register_outputs(
-        self,
-        input_vals: dict[str, list[Any | None]],
-        output_vals: dict[str, list[Any | None]],
-        sim_generics: dict[str, Any],
-    ) -> None:
-        reset_type = str(sim_generics.get("RESET_TYPE", "sync")).lower()
-        polarity   = str(sim_generics.get("RESET_POLARITY", "high")).lower()
-
-        d_vals   = next((v for k, v in input_vals.items() if k.lower() == "d"),
-                        [None] * self._n_cycles)
-        rst_vals = next((v for k, v in input_vals.items() if k.lower() == "rst"),
-                        [None] * self._n_cycles)
-
-        def rst_active(val: Any | None) -> bool:
-            if val is None:
-                return False
-            return bool(val) if polarity == "high" else not bool(val)
-
-        q_vals: list[Any | None] = []
-        for n in range(self._n_cycles):
-            rst_now  = rst_vals[n]     if n < len(rst_vals) else None
-            rst_prev = rst_vals[n - 1] if n > 0 and (n - 1) < len(rst_vals) else None
-            d_prev   = d_vals[n - 1]   if n > 0 and (n - 1) < len(d_vals)   else None
-
-            if reset_type == "async" and rst_active(rst_now):
-                q_vals.append(0)
-            elif n == 0:
-                q_vals.append(None)
-            elif reset_type == "sync" and rst_active(rst_prev):
-                q_vals.append(0)
-            else:
-                q_vals.append(d_prev)
-
-        q_key = next((k for k in output_vals if k.lower() == "q"), None)
-        if q_key is not None:
-            output_vals[q_key] = q_vals
 
     # ------------------------------------------------------------------
     # Value conversion helpers

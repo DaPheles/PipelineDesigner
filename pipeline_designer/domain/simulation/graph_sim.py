@@ -168,13 +168,14 @@ class DesignSimulator:
 
             if self._is_register(defn):
                 self._regs.add(inst.id)
-            else:
-                in_ports  = [p.name for p in defn.get_input_ports()
-                             if p.signal_class not in (PortSignalClass.CLOCK, PortSignalClass.RESET)]
-                out_ports = [p.name for p in defn.get_output_ports()]
-                self._exec_input_ports[inst.id]  = in_ports
-                self._exec_output_ports[inst.id] = out_ports
 
+            in_ports  = [p.name for p in defn.get_input_ports()
+                         if p.signal_class not in (PortSignalClass.CLOCK, PortSignalClass.RESET)]
+            out_ports = [p.name for p in defn.get_output_ports()]
+            self._exec_input_ports[inst.id]  = in_ports
+            self._exec_output_ports[inst.id] = out_ports
+
+            if defn.behavior is not None:
                 # In float/ideal mode prefer ideal_code when the primitive
                 # provides one (e.g. Adder_Carry which uses bit operations).
                 code_body = (
@@ -232,27 +233,26 @@ class DesignSimulator:
                 for port in defn.get_output_ports():
                     self._latency_buffers[(inst_id, port.name)] = deque()
 
-        # Pre-compute zero values for register Q outputs.
-        # Traces each register's Q connection to find the consumer port's
-        # BehaviorPortType, then quantizes 0.0 to that format.
-        # Falls back to np.float64(0.0) if the format cannot be determined.
-        self._reg_zero: dict[UUID, SignalValue] = {}
+        # Pre-compute zero values for each register output port.
+        # Keyed by (reg_id, out_port_name) so any port layout is supported.
+        self._reg_zero: dict[_NetKey, SignalValue] = {}
         for reg_id in self._regs:
-            self._reg_zero[reg_id] = self._infer_reg_zero(reg_id)
+            for out_port in self._exec_output_ports[reg_id]:
+                self._reg_zero[(reg_id, out_port)] = self._infer_reg_zero(reg_id, out_port)
 
-    def _infer_reg_zero(self, reg_id: UUID) -> SignalValue:
-        """Return a zero signal value for a register's Q output.
+    def _infer_reg_zero(self, reg_id: UUID, out_port: str) -> SignalValue:
+        """Return a zero signal value for one output port of a register.
 
-        In float mode always returns plain 0.0.  In fixed-point mode traces Q
-        to a consumer port, reads its SignalType, and quantizes 0.0 to that
-        format.  Falls back to numpy float64(0.0) if unavailable.
+        In float mode always returns plain 0.0.  In fixed-point mode traces the
+        output to a consumer port, reads its SignalType, and quantizes 0.0 to
+        that format.  Falls back to numpy float64(0.0) if unavailable.
         """
         if self._float_mode:
             return np.float64(0.0)
 
         for (tgt_id, tgt_port), driver in self._drivers.items():
             src_id, src_port = driver
-            if src_id != reg_id or src_port != "q":
+            if src_id != reg_id or src_port != out_port:
                 continue
             if tgt_id == _IFACE or tgt_id not in self._inst_def:
                 continue
@@ -331,11 +331,11 @@ class DesignSimulator:
     # ── Runtime ───────────────────────────────────────────────────────────────
 
     def reset(self) -> None:
-        """Clear all signals, executor state, and seed register Q outputs with zeros."""
+        """Clear all signals, executor state, and seed register outputs with zeros."""
         self._signals.clear()
         self._iface_inputs.clear()
-        for reg_id, zero in self._reg_zero.items():
-            self._signals[(reg_id, "q")] = zero
+        for (reg_id, out_port), zero in self._reg_zero.items():
+            self._signals[(reg_id, out_port)] = zero
         for executor in self._executors.values():
             executor.reset_state()
         for (inst_id, _port_name), buf in self._latency_buffers.items():
@@ -381,7 +381,8 @@ class DesignSimulator:
         for reg_id in self._regs:
             reset_type = str(self._inst_generics[reg_id].get("RESET_TYPE", "sync")).lower()
             if reset_type == "async" and self._is_rst_active(reg_id):
-                self._signals[(reg_id, "q")] = self._reg_zero[reg_id]
+                for out_port in self._exec_output_ports[reg_id]:
+                    self._signals[(reg_id, out_port)] = self._reg_zero[(reg_id, out_port)]
 
         # ── Phase 1: combinational ────────────────────────────────────────────
         for inst_id in self._topo_order:
@@ -419,10 +420,30 @@ class DesignSimulator:
         # ── Phase 2: register capture ─────────────────────────────────────────
         new_q: dict[_NetKey, SignalValue] = {}
         for reg_id in self._regs:
+            out_ports = self._exec_output_ports[reg_id]
             if self._is_rst_active(reg_id):
-                new_q[(reg_id, "q")] = self._reg_zero[reg_id]
+                for out_port in out_ports:
+                    new_q[(reg_id, out_port)] = self._reg_zero[(reg_id, out_port)]
             else:
-                new_q[(reg_id, "q")] = self._resolve(reg_id, "d")
+                executor = self._executors.get(reg_id)
+                if executor is not None:
+                    in_ports = self._exec_input_ports[reg_id]
+                    args = [self._resolve(reg_id, p) for p in in_ports]
+                    try:
+                        result = executor(*args)
+                    except Exception as exc:
+                        label = self._inst_label.get(reg_id, str(reg_id))
+                        raise type(exc)(f"[{label}] {exc}") from exc
+                    if len(out_ports) == 1:
+                        new_q[(reg_id, out_ports[0])] = self._quantize_signal(result, reg_id, out_ports[0])
+                    else:
+                        for i, pname in enumerate(out_ports):
+                            new_q[(reg_id, pname)] = self._quantize_signal(result[i], reg_id, pname)
+                else:
+                    # Fallback: no behavior code — pass data inputs to outputs positionally
+                    in_ports = self._exec_input_ports[reg_id]
+                    for i, out_port in enumerate(out_ports):
+                        new_q[(reg_id, out_port)] = self._resolve(reg_id, in_ports[i]) if i < len(in_ports) else None
         self._signals.update(new_q)
 
     def _quantize_signal(self, val: Any, inst_id: UUID, port_name: str) -> Any:
