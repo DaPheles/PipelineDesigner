@@ -347,6 +347,31 @@ class PropertyEditor(QWidget):
             }
             resolved.update(instance.generic_values)
 
+            # Evaluate string-valued generics (e.g. "LSB", "2*LSB") against
+            # the outer design's concrete defaults so that to_vhdl_type() can
+            # produce a fully-resolved type string instead of a half-substituted
+            # expression like "sfixed((37)+(2*LSB)-1 downto 2*LSB)".
+            if self._current_design:
+                from pipeline_designer.domain.models.behavior import (
+                    _eval_index, _substitute_generics,
+                )
+                outer_concrete: dict[str, int] = {
+                    g.name: int(g.default_value)
+                    for g in self._current_design.component_config.generics
+                    if g.default_value is not None
+                    and isinstance(g.default_value, (int, float))
+                    and not isinstance(g.default_value, bool)
+                }
+                for name, val in list(resolved.items()):
+                    if isinstance(val, str):
+                        try:
+                            resolved[name] = _eval_index(
+                                _substitute_generics(val, outer_concrete),
+                                outer_concrete,
+                            )
+                        except (ValueError, KeyError):
+                            pass
+
             port_table = PortInfoTable()
             port_table.set_ports(definition.ports, resolved)
             self._content_layout.addRow(port_table)

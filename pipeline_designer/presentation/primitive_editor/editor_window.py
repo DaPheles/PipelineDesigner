@@ -22,7 +22,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -32,8 +32,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QScrollArea,
@@ -43,6 +41,8 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTextEdit,
     QToolBar,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -54,6 +54,8 @@ from .behavior_editor import BehaviorEditor
 from .generic_table import GenericTable
 from .port_table import PortTable
 from .primitive_canvas import PrimitiveCanvas
+
+_SETTINGS_KEY = "primitive_editor/expanded"
 
 
 class PrimitiveEditorWindow(QMainWindow):
@@ -132,10 +134,33 @@ class PrimitiveEditorWindow(QMainWindow):
     def _setup_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left: primitive list
-        self._list = QListWidget()
+        # Left: primitive tree (grouped by category)
+        self._list = QTreeWidget()
+        self._list.setHeaderHidden(True)
         self._list.setMinimumWidth(180)
         self._list.setMaximumWidth(260)
+        self._list.setIndentation(14)
+        self._list.setAnimated(True)
+        self._list.setStyleSheet("""
+            QTreeWidget {
+                background-color: #2b2b2b;
+                border: none;
+                color: #ffffff;
+            }
+            QTreeWidget::item {
+                padding: 4px 8px;
+                border-radius: 3px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #4a90d9;
+            }
+            QTreeWidget::item:hover:!selected {
+                background-color: #3a3a3a;
+            }
+            QTreeWidget::branch {
+                background-color: #2b2b2b;
+            }
+        """)
         self._list.currentItemChanged.connect(self._on_list_selection_changed)
         splitter.addWidget(self._list)
 
@@ -250,16 +275,40 @@ class PrimitiveEditorWindow(QMainWindow):
     def _populate_list(self) -> None:
         self._list.blockSignals(True)
         self._list.clear()
-        for name in self._loader.get_primitive_names():
-            item = QListWidgetItem(name)
-            self._list.addItem(item)
+
+        categories: dict[str, list[str]] = {}
+        for comp in self._loader.get_primitives():
+            categories.setdefault(comp.category, []).append(comp.name)
+
+        for cat_name in sorted(categories.keys()):
+            cat_item = QTreeWidgetItem(self._list, [cat_name])
+            cat_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            cat_font = cat_item.font(0)
+            cat_font.setBold(True)
+            cat_item.setFont(0, cat_font)
+            cat_item.setForeground(0, QColor("#aaaaaa"))
+            cat_item.setData(0, Qt.ItemDataRole.UserRole, None)
+
+            for prim_name in sorted(categories[cat_name]):
+                leaf = QTreeWidgetItem(cat_item, [prim_name])
+                leaf.setData(0, Qt.ItemDataRole.UserRole, prim_name)
+                leaf.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                )
+
+            cat_item.setExpanded(True)
+
         self._list.blockSignals(False)
+        self._restore_expand_state()
 
     def _select_by_name(self, name: str) -> None:
-        for i in range(self._list.count()):
-            if self._list.item(i).text() == name:
-                self._list.setCurrentRow(i)
-                return
+        for i in range(self._list.topLevelItemCount()):
+            cat = self._list.topLevelItem(i)
+            for j in range(cat.childCount()):
+                leaf = cat.child(j)
+                if leaf.text(0) == name:
+                    self._list.setCurrentItem(leaf)
+                    return
 
     # ------------------------------------------------------------------
     # Load / populate form
@@ -507,20 +556,49 @@ class PrimitiveEditorWindow(QMainWindow):
             self._canvas.set_component(self._collect_component())
 
     # ------------------------------------------------------------------
+    # Expand / collapse persistence
+    # ------------------------------------------------------------------
+
+    def _collect_expand_state(self) -> dict[str, bool]:
+        state: dict[str, bool] = {}
+        for i in range(self._list.topLevelItemCount()):
+            cat = self._list.topLevelItem(i)
+            state[cat.text(0)] = cat.isExpanded()
+        return state
+
+    def _restore_expand_state(self) -> None:
+        settings = QSettings("PipelineDesigner", "PrimitiveEditor")
+        saved: dict = settings.value(_SETTINGS_KEY, {})
+        if not isinstance(saved, dict):
+            return
+        for i in range(self._list.topLevelItemCount()):
+            cat = self._list.topLevelItem(i)
+            key = cat.text(0)
+            if key in saved:
+                cat.setExpanded(bool(saved[key]))
+
+    def save_expand_state(self) -> None:
+        """Persist current expand state to QSettings (called on close)."""
+        settings = QSettings("PipelineDesigner", "PrimitiveEditor")
+        settings.setValue(_SETTINGS_KEY, self._collect_expand_state())
+
+    # ------------------------------------------------------------------
     # List selection
     # ------------------------------------------------------------------
 
     def _on_list_selection_changed(
-        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+        self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
     ) -> None:
         if current is None:
             return
+        name = current.data(0, Qt.ItemDataRole.UserRole)
+        if name is None:
+            return
         if not self._confirm_discard():
-            # Revert selection
             if _previous:
                 self._list.setCurrentItem(_previous)
             return
-        comp = self._loader.get_component(current.text())
+        comp = self._loader.get_component(name)
         if comp:
             self._load_component(comp)
             self._status.showMessage(f"Loaded '{comp.name}'.")
@@ -593,6 +671,7 @@ class PrimitiveEditorWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        self.save_expand_state()
         if self._modified:
             reply = QMessageBox.question(
                 self,

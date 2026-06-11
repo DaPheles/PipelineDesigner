@@ -159,9 +159,6 @@ class Connection(BaseModel):
     signal_name: str | None = Field(
         default=None, description="Optional signal/wire name"
     )
-    waypoints: list[tuple[float, float]] = Field(
-        default_factory=list, description="Intermediate routing points"
-    )
 
     def get_display_name(self) -> str:
         """Get the display name for this connection."""
